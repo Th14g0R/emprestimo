@@ -123,4 +123,6 @@ call manage.bat
 goto :show_menu
 
 :end
+echo.
+pause
 endlocal

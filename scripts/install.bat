@@ -22,7 +22,8 @@ if %errorlevel% neq 0 (
     echo [!] Este script requer privilegios de administrador!
     echo.
     echo Solicitando privilegios...
-    powershell -Command "Start-Process cmd -ArgumentList '/c %~s0' -Verb RunAs" >nul 2>&1
+    powershell -Command "Start-Process cmd -ArgumentList '/c cd /d %CD% ^& %~s0' -Verb RunAs"
+    pause
     exit /b
 )
 
@@ -35,9 +36,7 @@ REM ============================================================================
 set "INSTALL_DIR=%ProgramFiles%\SistemaEmprestimos"
 set "APP_NAME=Sistema-Emprestimos"
 set "SERVICE_NAME=SistemaEmprestimosBackend"
-set "SERVICE_DISPLAY_NAME=Sistema de Emprestimos - Backend"
 set "FRONTEND_SERVICE_NAME=SistemaEmprestimosFrontend"
-set "FRONTEND_DISPLAY_NAME=Sistema de Emprestimos - Frontend"
 set "REPO_URL=https://github.com/Th14g0R/emprestimo.git"
 
 echo =====================================================================
@@ -54,20 +53,24 @@ echo [1/6] Verificando Node.js...
 node --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [!] Node.js nao encontrado. Instalando...
+    echo [!] Baixando de: https://nodejs.org/dist/v18.18.0/node-v18.18.0-x64.msi
     
-    powershell -Command ^
-        "$ProgressPreference = 'SilentlyContinue'; ^
-        echo 'Baixando Node.js...'; ^
-        Invoke-WebRequest -Uri 'https://nodejs.org/dist/v18.18.0/node-v18.18.0-x64.msi' -OutFile '%temp%\nodejs.msi'; ^
-        echo 'Instalando...'; ^
-        Start-Process msiexec -ArgumentList '/i %temp%\nodejs.msi /quiet /norestart' -Wait; ^
-        Remove-Item '%temp%\nodejs.msi' -Force" 2>nul
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://nodejs.org/dist/v18.18.0/node-v18.18.0-x64.msi' -OutFile '%temp%\nodejs.msi'" 2>nul
     
-    if !errorlevel! equ 0 (
+    if exist "%temp%\nodejs.msi" (
+        echo [!] Instalando Node.js...
+        msiexec /i "%temp%\nodejs.msi" /quiet /norestart
+        timeout /t 5 /nobreak >nul
+        del "%temp%\nodejs.msi" 2>nul
+        
+        REM Recarrega PATH
+        for /f "delims=" %%i in ('powershell -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('Path', 'Machine')"') do set "PATH=%%i"
+        
         echo [OK] Node.js instalado com sucesso
-        set "PATH=%PATH%;C:\Program Files\nodejs"
     ) else (
-        echo [ERRO] Falha ao instalar Node.js
+        echo [ERRO] Falha ao baixar Node.js
+        echo [!] Tente novamente ou instale manualmente de:
+        echo [!] https://nodejs.org/
         goto error_exit
     )
 ) else (
@@ -83,27 +86,25 @@ echo [2/6] Verificando Git...
 git --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [!] Git nao encontrado. Instalando...
+    echo [!] Baixando de: https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe
     
-    powershell -Command ^
-        "$ProgressPreference = 'SilentlyContinue'; ^
-        echo 'Baixando Git...'; ^
-        try { ^
-            Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe' -OutFile '%temp%\GitInstaller.exe'; ^
-            echo 'Instalando...'; ^
-            Start-Process '%temp%\GitInstaller.exe' -ArgumentList '/VERYSILENT /NORESTART /NOCANCEL' -Wait; ^
-            Remove-Item '%temp%\GitInstaller.exe' -Force ^
-        } catch { ^
-            Write-Host 'Erro ao baixar Git'; ^
-            exit 1 ^
-        }" 2>nul
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe' -OutFile '%temp%\GitInstaller.exe'" 2>nul
     
-    if !errorlevel! equ 0 (
+    if exist "%temp%\GitInstaller.exe" (
+        echo [!] Instalando Git...
+        "%temp%\GitInstaller.exe" /VERYSILENT /NORESTART
+        timeout /t 5 /nobreak >nul
+        del "%temp%\GitInstaller.exe" 2>nul
+        
+        REM Recarrega PATH
+        for /f "delims=" %%i in ('powershell -NoProfile -Command "[System.Environment]::GetEnvironmentVariable('Path', 'Machine')"') do set "PATH=%%i"
+        
         echo [OK] Git instalado com sucesso
-        set "PATH=%PATH%;C:\Program Files\Git\cmd"
-        REM Aguarda Git ficar disponivel
         timeout /t 2 /nobreak >nul
     ) else (
-        echo [ERRO] Falha ao instalar Git
+        echo [ERRO] Falha ao baixar Git
+        echo [!] Tente novamente ou instale manualmente de:
+        echo [!] https://git-scm.com/download/win
         goto error_exit
     )
 ) else (
@@ -119,30 +120,19 @@ echo [3/6] Verificando Docker...
 docker --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [!] Docker nao encontrado. Instalando Docker Desktop...
+    echo [!] Baixando de: https://desktop.docker.com/win/main/amd64/
     
-    powershell -Command ^
-        "$ProgressPreference = 'SilentlyContinue'; ^
-        echo 'Baixando Docker Desktop (pode levar alguns minutos)...'; ^
-        try { ^
-            Invoke-WebRequest -Uri 'https://desktop.docker.com/win/main/amd64/Docker%%20Desktop%%20Installer.exe' -OutFile '%temp%\DockerInstaller.exe'; ^
-            echo 'Instalando Docker Desktop (aguarde, pode tomar alguns minutos)...'; ^
-            Start-Process '%temp%\DockerInstaller.exe' -ArgumentList 'install --quiet' -Wait; ^
-            Remove-Item '%temp%\DockerInstaller.exe' -Force ^
-        } catch { ^
-            Write-Host 'Erro ao baixar: tentando URL alternativa'; ^
-            $url2 = 'https://download.docker.com/win/stable/DockerDesktopInstaller.exe'; ^
-            Invoke-WebRequest -Uri $url2 -OutFile '%temp%\DockerInstaller.exe'; ^
-            Start-Process '%temp%\DockerInstaller.exe' -ArgumentList 'install --quiet' -Wait; ^
-            Remove-Item '%temp%\DockerInstaller.exe' -Force ^
-        }" 2>nul
+    powershell -NoProfile -Command "Invoke-WebRequest -Uri 'https://desktop.docker.com/win/main/amd64/Docker%%20Desktop%%20Installer.exe' -OutFile '%temp%\DockerInstaller.exe'" 2>nul
     
-    if !errorlevel! equ 0 (
-        echo [OK] Docker Desktop instalado com sucesso
-        echo [!] Aguarde Docker iniciar (pode levar alguns minutos)...
+    if exist "%temp%\DockerInstaller.exe" (
+        echo [!] Instalando Docker Desktop (pode levar alguns minutos)...
+        "%temp%\DockerInstaller.exe" install --quiet
         timeout /t 10 /nobreak >nul
+        del "%temp%\DockerInstaller.exe" 2>nul
+        echo [OK] Docker Desktop instalado
     ) else (
-        echo [AVISO] Falha ao instalar Docker Desktop
-        echo [!] Continuando com instalacao do resto...
+        echo [AVISO] Falha ao baixar Docker
+        echo [!] Continuando sem Docker por enquanto...
     )
 ) else (
     echo [OK] Docker ja esta instalado
@@ -155,16 +145,10 @@ REM Criar diretorio de instalacao
 REM ============================================================================
 echo [4/6] Preparando diretorio de instalacao...
 if exist "%INSTALL_DIR%" (
-    echo [!] Diretorio ja existe. Realizando backup...
-    if not exist "%INSTALL_DIR%_backup" mkdir "%INSTALL_DIR%_backup"
-    xcopy "%INSTALL_DIR%" "%INSTALL_DIR%_backup" /E /I /Y >nul 2>&1
-)
-
-if not exist "%INSTALL_DIR%" (
+    echo [!] Diretorio ja existe
+) else (
     mkdir "%INSTALL_DIR%"
     echo [OK] Diretorio criado: %INSTALL_DIR%
-) else (
-    echo [OK] Diretorio ja existe
 )
 echo.
 
@@ -176,7 +160,7 @@ echo [5/6] Clonando repositorio...
 REM Verifica novamente se Git foi instalado com sucesso
 git --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERRO] Git nao esta disponivel mesmo apos instalacao
+    echo [ERRO] Git nao esta disponivel
     echo [!] Tente reiniciar o computador e executar novamente
     goto error_exit
 )
@@ -185,13 +169,10 @@ cd /d "%INSTALL_DIR%"
 
 if exist "%INSTALL_DIR%\.git" (
     echo [!] Repositorio ja clonado. Atualizando...
-    git pull origin main >nul 2>&1
-    if !errorlevel! neq 0 (
-        echo [AVISO] Erro ao fazer git pull - continuando...
-    )
+    git pull origin main 2>nul
 ) else (
     echo [!] Clonando repositorio de %REPO_URL%
-    git clone "%REPO_URL%" . >nul 2>&1
+    git clone "%REPO_URL%" . 2>nul
     
     if !errorlevel! neq 0 (
         echo [ERRO] Falha ao clonar repositorio
@@ -216,13 +197,12 @@ if not exist "package.json" (
 )
 
 echo [!] Executando npm install...
-call npm install --legacy-peer-deps >nul 2>&1
+call npm install --legacy-peer-deps 2>nul
 
 if %errorlevel% equ 0 (
     echo [OK] Dependencias instaladas com sucesso
 ) else (
     echo [AVISO] Houve erros ao instalar dependencias
-    echo [!] Tentando continuar...
 )
 echo.
 
@@ -245,39 +225,6 @@ if not exist "%INSTALL_DIR%\.env" (
 echo.
 
 REM ============================================================================
-REM Iniciar Docker Compose
-REM ============================================================================
-echo Iniciando Docker Compose...
-cd /d "%INSTALL_DIR%"
-
-if exist "docker-compose.yml" (
-    docker-compose up -d >nul 2>&1
-    if !errorlevel! equ 0 (
-        echo [OK] Docker Compose iniciado
-    ) else (
-        echo [AVISO] Erro ao iniciar Docker Compose
-    )
-) else (
-    echo [!] docker-compose.yml nao encontrado
-)
-echo.
-
-REM ============================================================================
-REM Criar atalho na area de trabalho
-REM ============================================================================
-echo Criando atalho na area de trabalho...
-set "DESKTOP=%USERPROFILE%\Desktop"
-if exist "%DESKTOP%" (
-    (
-        echo @echo off
-        echo cd /d "%INSTALL_DIR%"
-        echo call scripts\run.bat
-    ) > "%DESKTOP%\Sistema Emprestimos.bat"
-    echo [OK] Atalho criado: %DESKTOP%\Sistema Emprestimos.bat
-)
-echo.
-
-REM ============================================================================
 REM Sucesso
 REM ============================================================================
 echo =====================================================================
@@ -288,9 +235,6 @@ echo Proximo passos:
 echo  1. Acesse: http://localhost:3000
 echo  2. Backend API: http://localhost:3001/api
 echo  3. Admin BD: http://localhost:8080
-echo.
-echo Para gerenciar o sistema, execute:
-echo  %DESKTOP%\Sistema Emprestimos.bat
 echo.
 timeout /t 5 /nobreak >nul
 goto end
@@ -309,4 +253,6 @@ timeout /t 10 /nobreak >nul
 goto end
 
 :end
+echo.
+pause
 endlocal
