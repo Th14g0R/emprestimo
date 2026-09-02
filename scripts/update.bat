@@ -41,12 +41,36 @@ echo =====================================================================
 echo.
 
 REM ============================================================================
-REM Verificar se o sistema está instalado
+REM Verificar dependencias
+REM ============================================================================
+echo [0/4] Verificando dependencias...
+
+git --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERRO] Git nao esta instalado
+    echo [!] Execute primeiro: run.bat install
+    pause >nul
+    exit /b 1
+)
+echo [OK] Git encontrado
+
+docker --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [AVISO] Docker nao esta instalado
+    echo [!] Continue assim mesmo, Docker pode ser instalado depois
+) else (
+    echo [OK] Docker encontrado
+)
+
+echo.
+
+REM ============================================================================
+REM Verificar se o sistema esta instalado
 REM ============================================================================
 if not exist "%INSTALL_DIR%" (
     echo [!] Sistema nao encontrado em: %INSTALL_DIR%
     echo.
-    echo Execute o instalador primeiro.
+    echo Execute o instalador primeiro: run.bat install
     echo.
     pause >nul
     exit /b 1

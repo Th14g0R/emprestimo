@@ -87,14 +87,21 @@ if %errorlevel% neq 0 (
     powershell -Command ^
         "$ProgressPreference = 'SilentlyContinue'; ^
         echo 'Baixando Git...'; ^
-        Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe' -OutFile '%temp%\GitInstaller.exe'; ^
-        echo 'Instalando...'; ^
-        Start-Process '%temp%\GitInstaller.exe' -ArgumentList '/VERYSILENT /NORESTART' -Wait; ^
-        Remove-Item '%temp%\GitInstaller.exe' -Force" 2>nul
+        try { ^
+            Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe' -OutFile '%temp%\GitInstaller.exe'; ^
+            echo 'Instalando...'; ^
+            Start-Process '%temp%\GitInstaller.exe' -ArgumentList '/VERYSILENT /NORESTART /NOCANCEL' -Wait; ^
+            Remove-Item '%temp%\GitInstaller.exe' -Force ^
+        } catch { ^
+            Write-Host 'Erro ao baixar Git'; ^
+            exit 1 ^
+        }" 2>nul
     
     if !errorlevel! equ 0 (
         echo [OK] Git instalado com sucesso
         set "PATH=%PATH%;C:\Program Files\Git\cmd"
+        REM Aguarda Git ficar disponivel
+        timeout /t 2 /nobreak >nul
     ) else (
         echo [ERRO] Falha ao instalar Git
         goto error_exit
@@ -115,20 +122,18 @@ if %errorlevel% neq 0 (
     
     powershell -Command ^
         "$ProgressPreference = 'SilentlyContinue'; ^
-        $url = 'https://desktop.docker.com/win/main/amd64/Docker%%20Desktop%%20Installer.exe'; ^
-        $output = '%temp%\DockerInstaller.exe'; ^
         echo 'Baixando Docker Desktop (pode levar alguns minutos)...'; ^
         try { ^
-            Invoke-WebRequest -Uri $url -OutFile $output; ^
+            Invoke-WebRequest -Uri 'https://desktop.docker.com/win/main/amd64/Docker%%20Desktop%%20Installer.exe' -OutFile '%temp%\DockerInstaller.exe'; ^
             echo 'Instalando Docker Desktop (aguarde, pode tomar alguns minutos)...'; ^
-            Start-Process $output -ArgumentList 'install --quiet' -Wait; ^
-            Remove-Item $output -Force ^
+            Start-Process '%temp%\DockerInstaller.exe' -ArgumentList 'install --quiet' -Wait; ^
+            Remove-Item '%temp%\DockerInstaller.exe' -Force ^
         } catch { ^
             Write-Host 'Erro ao baixar: tentando URL alternativa'; ^
             $url2 = 'https://download.docker.com/win/stable/DockerDesktopInstaller.exe'; ^
-            Invoke-WebRequest -Uri $url2 -OutFile $output; ^
-            Start-Process $output -ArgumentList 'install --quiet' -Wait; ^
-            Remove-Item $output -Force ^
+            Invoke-WebRequest -Uri $url2 -OutFile '%temp%\DockerInstaller.exe'; ^
+            Start-Process '%temp%\DockerInstaller.exe' -ArgumentList 'install --quiet' -Wait; ^
+            Remove-Item '%temp%\DockerInstaller.exe' -Force ^
         }" 2>nul
     
     if !errorlevel! equ 0 (
@@ -167,19 +172,31 @@ REM ============================================================================
 REM Clonar repositorio do Git
 REM ============================================================================
 echo [5/6] Clonando repositorio...
+
+REM Verifica novamente se Git foi instalado com sucesso
+git --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERRO] Git nao esta disponivel mesmo apos instalacao
+    echo [!] Tente reiniciar o computador e executar novamente
+    goto error_exit
+)
+
 cd /d "%INSTALL_DIR%"
 
 if exist "%INSTALL_DIR%\.git" (
     echo [!] Repositorio ja clonado. Atualizando...
-    cd /d "%INSTALL_DIR%"
     git pull origin main >nul 2>&1
+    if !errorlevel! neq 0 (
+        echo [AVISO] Erro ao fazer git pull - continuando...
+    )
 ) else (
     echo [!] Clonando repositorio de %REPO_URL%
-    git clone "%REPO_URL%" "%INSTALL_DIR%" >nul 2>&1
+    git clone "%REPO_URL%" . >nul 2>&1
     
     if !errorlevel! neq 0 (
         echo [ERRO] Falha ao clonar repositorio
         echo [!] Verifique sua conexao com a internet
+        echo [!] URL: %REPO_URL%
         goto error_exit
     )
 )
