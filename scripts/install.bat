@@ -9,345 +9,287 @@ REM  ===========================================================================
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
-REM Cores para output
-for /F %%A in ('copy /Z "%~f0" nul') do set "BS=%%A"
-set "GREEN=[92m"
-set "RED=[91m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "RESET=[0m"
-
-title Instalador - Sistema de Empréstimos
+title Instalador - Sistema de Emprestimos
 
 REM ============================================================================
-REM Verificar privilégios de administrador
+REM Verificar privilegios de administrador
 REM ============================================================================
 echo.
-echo %BLUE%[*] Verificando privilégios de administrador...%RESET%
+echo [*] Verificando privilegios de administrador...
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %RED%[!] Este script requer privilégios de administrador!%RESET%
+    echo [!] Este script requer privilegios de administrador!
     echo.
-    echo Solicitando privilégios...
+    echo Solicitando privilegios...
     powershell -Command "Start-Process cmd -ArgumentList '/c %~s0' -Verb RunAs" >nul 2>&1
     exit /b
 )
 
-echo %GREEN%[✓] Privilégios de administrador confirmados%RESET%
+echo [OK] Privilegios de administrador confirmados
 echo.
 
 REM ============================================================================
-REM Definir variáveis
+REM Definir variaveis
 REM ============================================================================
-setlocal enabledelayedexpansion
 set "INSTALL_DIR=%ProgramFiles%\SistemaEmprestimos"
 set "APP_NAME=Sistema-Emprestimos"
 set "SERVICE_NAME=SistemaEmprestimosBackend"
-set "SERVICE_DISPLAY_NAME=Sistema de Empréstimos - Backend"
+set "SERVICE_DISPLAY_NAME=Sistema de Emprestimos - Backend"
 set "FRONTEND_SERVICE_NAME=SistemaEmprestimosFrontend"
-set "FRONTEND_DISPLAY_NAME=Sistema de Empréstimos - Frontend"
+set "FRONTEND_DISPLAY_NAME=Sistema de Emprestimos - Frontend"
+set "REPO_URL=https://github.com/Th14g0R/emprestimo.git"
 
-echo %BLUE%=====================================================================%RESET%
-echo %BLUE%  INSTALADOR - Sistema de Controle de Empréstimos%RESET%
-echo %BLUE%=====================================================================%RESET%
+echo =====================================================================
+echo  INSTALADOR - Sistema de Controle de Emprestimos
+echo =====================================================================
 echo.
-echo Diretório de instalação: %INSTALL_DIR%
+echo Diretorio de instalacao: %INSTALL_DIR%
 echo.
 
 REM ============================================================================
 REM Verificar e instalar Node.js
 REM ============================================================================
-echo %BLUE%[1/5] Verificando Node.js...%RESET%
+echo [1/6] Verificando Node.js...
 node --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %YELLOW%[!] Node.js não encontrado. Instalando...%RESET%
-    REM Baixar Node.js LTS
+    echo [!] Node.js nao encontrado. Instalando...
+    
     powershell -Command ^
         "$ProgressPreference = 'SilentlyContinue'; ^
+        echo 'Baixando Node.js...'; ^
         Invoke-WebRequest -Uri 'https://nodejs.org/dist/v18.18.0/node-v18.18.0-x64.msi' -OutFile '%temp%\nodejs.msi'; ^
-        Start-Process msiexec -ArgumentList '/i %temp%\nodejs.msi /quiet' -Wait; ^
-        Remove-Item '%temp%\nodejs.msi'" >nul 2>&1
+        echo 'Instalando...'; ^
+        Start-Process msiexec -ArgumentList '/i %temp%\nodejs.msi /quiet /norestart' -Wait; ^
+        Remove-Item '%temp%\nodejs.msi' -Force" 2>nul
     
     if !errorlevel! equ 0 (
-        echo %GREEN%[✓] Node.js instalado com sucesso%RESET%
-        REM Atualizar PATH
+        echo [OK] Node.js instalado com sucesso
         set "PATH=%PATH%;C:\Program Files\nodejs"
     ) else (
-        echo %RED%[!] Erro ao instalar Node.js%RESET%
+        echo [ERRO] Falha ao instalar Node.js
         goto error_exit
     )
 ) else (
-    echo %GREEN%[✓] Node.js já está instalado%RESET%
-    for /f "tokens=*" %%i in ('node --version') do echo    Versão: %%i
-)
-echo.
-
-REM ============================================================================
-REM Verificar e instalar Docker
-REM ============================================================================
-echo %BLUE%[2/5] Verificando Docker...%RESET%
-docker --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo %YELLOW%[!] Docker não encontrado. Instalando Docker Desktop...%RESET%
-    echo.
-    echo Para instalar Docker Desktop, visite:
-    echo %BLUE%https://www.docker.com/products/docker-desktop%RESET%
-    echo.
-    echo Depois de instalar, execute este script novamente.
-    timeout /t 3 >nul
-    goto error_exit
-) else (
-    echo %GREEN%[✓] Docker já está instalado%RESET%
-    for /f "tokens=*" %%i in ('docker --version') do echo    %%i
+    echo [OK] Node.js ja esta instalado
+    for /f "tokens=*" %%i in ('node --version') do echo    Versao: %%i
 )
 echo.
 
 REM ============================================================================
 REM Verificar e instalar Git
 REM ============================================================================
-echo %BLUE%[3/5] Verificando Git...%RESET%
+echo [2/6] Verificando Git...
 git --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %YELLOW%[!] Git não encontrado. Instalando...%RESET%
+    echo [!] Git nao encontrado. Instalando...
+    
     powershell -Command ^
         "$ProgressPreference = 'SilentlyContinue'; ^
-        Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe' -OutFile '%temp%\git-installer.exe'; ^
-        Start-Process '%temp%\git-installer.exe' -ArgumentList '/VERYSILENT /NORESTART' -Wait; ^
-        Remove-Item '%temp%\git-installer.exe'" >nul 2>&1
+        echo 'Baixando Git...'; ^
+        Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.42.0.windows.1/Git-2.42.0-64-bit.exe' -OutFile '%temp%\GitInstaller.exe'; ^
+        echo 'Instalando...'; ^
+        Start-Process '%temp%\GitInstaller.exe' -ArgumentList '/VERYSILENT /NORESTART' -Wait; ^
+        Remove-Item '%temp%\GitInstaller.exe' -Force" 2>nul
     
     if !errorlevel! equ 0 (
-        echo %GREEN%[✓] Git instalado com sucesso%RESET%
+        echo [OK] Git instalado com sucesso
         set "PATH=%PATH%;C:\Program Files\Git\cmd"
     ) else (
-        echo %RED%[!] Erro ao instalar Git%RESET%
+        echo [ERRO] Falha ao instalar Git
         goto error_exit
     )
 ) else (
-    echo %GREEN%[✓] Git já está instalado%RESET%
-    for /f "tokens=*" %%i in ('git --version') do echo    %%i
+    echo [OK] Git ja esta instalado
+    for /f "tokens=*" %%i in ('git --version') do echo    Versao: %%i
 )
 echo.
 
 REM ============================================================================
-REM Criar diretório de instalação
+REM Verificar e instalar Docker
 REM ============================================================================
-echo %BLUE%[4/5] Criando diretórios...%RESET%
+echo [3/6] Verificando Docker...
+docker --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [!] Docker nao encontrado. Instalando Docker Desktop...
+    
+    powershell -Command ^
+        "$ProgressPreference = 'SilentlyContinue'; ^
+        $url = 'https://desktop.docker.com/win/main/amd64/Docker%%20Desktop%%20Installer.exe'; ^
+        $output = '%temp%\DockerInstaller.exe'; ^
+        echo 'Baixando Docker Desktop (pode levar alguns minutos)...'; ^
+        try { ^
+            Invoke-WebRequest -Uri $url -OutFile $output; ^
+            echo 'Instalando Docker Desktop (aguarde, pode tomar alguns minutos)...'; ^
+            Start-Process $output -ArgumentList 'install --quiet' -Wait; ^
+            Remove-Item $output -Force ^
+        } catch { ^
+            Write-Host 'Erro ao baixar: tentando URL alternativa'; ^
+            $url2 = 'https://download.docker.com/win/stable/DockerDesktopInstaller.exe'; ^
+            Invoke-WebRequest -Uri $url2 -OutFile $output; ^
+            Start-Process $output -ArgumentList 'install --quiet' -Wait; ^
+            Remove-Item $output -Force ^
+        }" 2>nul
+    
+    if !errorlevel! equ 0 (
+        echo [OK] Docker Desktop instalado com sucesso
+        echo [!] Aguarde Docker iniciar (pode levar alguns minutos)...
+        timeout /t 10 /nobreak >nul
+    ) else (
+        echo [AVISO] Falha ao instalar Docker Desktop
+        echo [!] Continuando com instalacao do resto...
+    )
+) else (
+    echo [OK] Docker ja esta instalado
+    for /f "tokens=*" %%i in ('docker --version') do echo    Versao: %%i
+)
+echo.
+
+REM ============================================================================
+REM Criar diretorio de instalacao
+REM ============================================================================
+echo [4/6] Preparando diretorio de instalacao...
+if exist "%INSTALL_DIR%" (
+    echo [!] Diretorio ja existe. Realizando backup...
+    if not exist "%INSTALL_DIR%_backup" mkdir "%INSTALL_DIR%_backup"
+    xcopy "%INSTALL_DIR%" "%INSTALL_DIR%_backup" /E /I /Y >nul 2>&1
+)
 
 if not exist "%INSTALL_DIR%" (
     mkdir "%INSTALL_DIR%"
-    echo %GREEN%[✓] Diretório criado: %INSTALL_DIR%%RESET%
+    echo [OK] Diretorio criado: %INSTALL_DIR%
 ) else (
-    echo %YELLOW%[!] Diretório já existe%RESET%
-)
-
-REM Copiar arquivos do projeto
-if exist "%~dp0.." (
-    echo Copiando arquivos do projeto...
-    xcopy "%~dp0..\*" "%INSTALL_DIR%\" /E /I /Y >nul 2>&1
-    echo %GREEN%[✓] Arquivos copiados%RESET%
-) else (
-    echo %YELLOW%[!] Não foi possível localizar arquivos do projeto%RESET%
-    echo Verifique se o script está no diretório correto
+    echo [OK] Diretorio ja existe
 )
 echo.
 
 REM ============================================================================
-REM Instalar dependências npm
+REM Clonar repositorio do Git
 REM ============================================================================
-echo %BLUE%[5/5] Instalando dependências...%RESET%
+echo [5/6] Clonando repositorio...
 cd /d "%INSTALL_DIR%"
 
-if exist package.json (
-    echo Executando: npm install
-    call npm install >nul 2>&1
-    if !errorlevel! equ 0 (
-        echo %GREEN%[✓] Dependências instaladas%RESET%
-    ) else (
-        echo %RED%[!] Erro ao instalar dependências%RESET%
+if exist "%INSTALL_DIR%\.git" (
+    echo [!] Repositorio ja clonado. Atualizando...
+    cd /d "%INSTALL_DIR%"
+    git pull origin main >nul 2>&1
+) else (
+    echo [!] Clonando repositorio de %REPO_URL%
+    git clone "%REPO_URL%" "%INSTALL_DIR%" >nul 2>&1
+    
+    if !errorlevel! neq 0 (
+        echo [ERRO] Falha ao clonar repositorio
+        echo [!] Verifique sua conexao com a internet
         goto error_exit
     )
-) else (
-    echo %YELLOW%[!] arquivo package.json não encontrado%RESET%
 )
+
+echo [OK] Repositorio pronto
 echo.
 
 REM ============================================================================
-REM Criar serviços do Windows
+REM Instalar dependencias
 REM ============================================================================
-echo %BLUE%Criando serviços do Windows...%RESET%
-
-REM Verificar se NSSM está instalado
-where nssm >nul 2>&1
-if %errorlevel% neq 0 (
-    echo %YELLOW%[!] Instalando NSSM (Non-Sucking Service Manager)...%RESET%
-    
-    powershell -Command ^
-        "$ProgressPreference = 'SilentlyContinue'; ^
-        Invoke-WebRequest -Uri 'https://nssm.cc/download/nssm-2.24-101-g897c7f7.zip' -OutFile '%temp%\nssm.zip'; ^
-        Expand-Archive -Path '%temp%\nssm.zip' -DestinationPath '%temp%' -Force; ^
-        Copy-Item '%temp%\nssm-*\win64\nssm.exe' 'C:\Windows\System32\' -Force; ^
-        Remove-Item '%temp%\nssm.zip'; ^
-        Remove-Item '%temp%\nssm-*' -Recurse -Force" >nul 2>&1
-)
-
-REM Criar serviço Backend
-echo Criando serviço Backend...
-nssm install "%SERVICE_NAME%" "cmd.exe" "/c cd /d %INSTALL_DIR%\apps\backend && npm start" >nul 2>&1
-nssm set "%SERVICE_NAME%" AppDirectory "%INSTALL_DIR%\apps\backend" >nul 2>&1
-nssm set "%SERVICE_NAME%" AppExit Default Restart >nul 2>&1
-nssm set "%SERVICE_NAME%" AppRestartDelay 5000 >nul 2>&1
-
-REM Definir que o serviço inicia automaticamente
-sc config "%SERVICE_NAME%" start= auto >nul 2>&1
-
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Serviço Backend criado e configurado%RESET%
-) else (
-    echo %YELLOW%[!] Falha ao criar serviço Backend. Tente manualmente mais tarde.%RESET%
-)
-
-REM Criar serviço Frontend
-echo Criando serviço Frontend...
-nssm install "%FRONTEND_SERVICE_NAME%" "cmd.exe" "/c cd /d %INSTALL_DIR%\apps\frontend && npm start" >nul 2>&1
-nssm set "%FRONTEND_SERVICE_NAME%" AppDirectory "%INSTALL_DIR%\apps\frontend" >nul 2>&1
-nssm set "%FRONTEND_SERVICE_NAME%" AppExit Default Restart >nul 2>&1
-nssm set "%FRONTEND_SERVICE_NAME%" AppRestartDelay 5000 >nul 2>&1
-
-sc config "%FRONTEND_SERVICE_NAME%" start= auto >nul 2>&1
-
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Serviço Frontend criado e configurado%RESET%
-) else (
-    echo %YELLOW%[!] Falha ao criar serviço Frontend. Tente manualmente mais tarde.%RESET%
-)
-echo.
-
-REM ============================================================================
-REM Iniciar serviços
-REM ============================================================================
-echo %BLUE%Iniciando serviços...%RESET%
-
-echo Iniciando Docker...
-start "Docker" "C:\Program Files\Docker\Docker\Docker.exe" >nul 2>&1
-timeout /t 5 >nul
-
-echo Iniciando banco de dados (PostgreSQL)...
+echo [6/6] Instalando dependencias npm...
 cd /d "%INSTALL_DIR%"
-docker-compose up -d >nul 2>&1
 
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Banco de dados iniciado%RESET%
-) else (
-    echo %YELLOW%[!] Erro ao iniciar Docker Compose. Verifique manualmente.%RESET%
-)
-echo.
-
-echo Iniciando serviço Backend...
-net start "%SERVICE_NAME%" >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Serviço Backend iniciado%RESET%
-) else (
-    echo %YELLOW%[!] Erro ao iniciar Backend. Verifique os logs.%RESET%
+if not exist "package.json" (
+    echo [ERRO] package.json nao encontrado
+    goto error_exit
 )
 
-timeout /t 3 >nul
+echo [!] Executando npm install...
+call npm install --legacy-peer-deps >nul 2>&1
 
-echo Iniciando serviço Frontend...
-net start "%FRONTEND_SERVICE_NAME%" >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Serviço Frontend iniciado%RESET%
+if %errorlevel% equ 0 (
+    echo [OK] Dependencias instaladas com sucesso
 ) else (
-    echo %YELLOW%[!] Erro ao iniciar Frontend. Verifique os logs.%RESET%
+    echo [AVISO] Houve erros ao instalar dependencias
+    echo [!] Tentando continuar...
 )
 echo.
 
 REM ============================================================================
-REM Criar atalhos de acesso rápido
+REM Criar arquivo .env
 REM ============================================================================
-echo %BLUE%Criando atalhos de acesso rápido...%RESET%
-
-REM Atalho na área de trabalho
-powershell -Command ^
-    "$WshShell = New-Object -ComObject WScript.Shell; ^
-    $Shortcut = $WshShell.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\Sistema Emprestimos.lnk'); ^
-    $Shortcut.TargetPath = 'http://localhost:3000'; ^
-    $Shortcut.Save()" >nul 2>&1
-
-echo %GREEN%[✓] Atalho criado na área de trabalho%RESET%
+echo Criando arquivo .env...
+if not exist "%INSTALL_DIR%\.env" (
+    (
+        echo DATABASE_URL=postgresql://emprestimos:senha123@localhost:5432/emprestimos_db
+        echo BACKEND_PORT=3001
+        echo FRONTEND_PORT=3000
+        echo JWT_SECRET=sua_chave_secreta_aqui_mudar_em_producao
+        echo NEXT_PUBLIC_API_URL=http://localhost:3001
+    ) > "%INSTALL_DIR%\.env"
+    echo [OK] Arquivo .env criado
+) else (
+    echo [!] Arquivo .env ja existe
+)
 echo.
 
 REM ============================================================================
-REM Criar arquivo de resumo
+REM Iniciar Docker Compose
 REM ============================================================================
-(
-    echo.
-    echo ====================================================================
-    echo INSTALACAO CONCLUIDA - Sistema de Empréstimos
-    echo ====================================================================
-    echo.
-    echo INFORMACOES IMPORTANTES:
-    echo.
-    echo Diretório de Instalação: %INSTALL_DIR%
-    echo.
-    echo SERVICOS CRIADOS:
-    echo - %SERVICE_DISPLAY_NAME%
-    echo - %FRONTEND_DISPLAY_NAME%
-    echo.
-    echo ACESSOS:
-    echo - Frontend: http://localhost:3000
-    echo - Backend API: http://localhost:3001/api
-    echo - Database Admin: http://localhost:8080
-    echo.
-    echo PROXIMOS PASSOS:
-    echo 1. Abra http://localhost:3000 no seu navegador
-    echo 2. Autentique-se com suas credenciais
-    echo 3. Configure o banco de dados conforme necessário
-    echo.
-    echo COMANDO PARA GERENCIAR SERVICOS:
-    echo - Para parar:  net stop "%SERVICE_NAME%"
-    echo - Para iniciar: net start "%SERVICE_NAME%"
-    echo - Para reiniciar: net stop "%SERVICE_NAME%" ^&^& net start "%SERVICE_NAME%"
-    echo.
-    echo ====================================================================
-) > "%INSTALL_DIR%\INSTALACAO_INFO.txt"
+echo Iniciando Docker Compose...
+cd /d "%INSTALL_DIR%"
 
-echo %BLUE%Abrindo informações de instalação...%RESET%
-start "" "%INSTALL_DIR%\INSTALACAO_INFO.txt"
+if exist "docker-compose.yml" (
+    docker-compose up -d >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [OK] Docker Compose iniciado
+    ) else (
+        echo [AVISO] Erro ao iniciar Docker Compose
+    )
+) else (
+    echo [!] docker-compose.yml nao encontrado
+)
+echo.
 
+REM ============================================================================
+REM Criar atalho na area de trabalho
+REM ============================================================================
+echo Criando atalho na area de trabalho...
+set "DESKTOP=%USERPROFILE%\Desktop"
+if exist "%DESKTOP%" (
+    (
+        echo @echo off
+        echo cd /d "%INSTALL_DIR%"
+        echo call scripts\run.bat
+    ) > "%DESKTOP%\Sistema Emprestimos.bat"
+    echo [OK] Atalho criado: %DESKTOP%\Sistema Emprestimos.bat
+)
 echo.
-echo %GREEN%=====================================================================%RESET%
-echo %GREEN% INSTALACAO CONCLUIDA COM SUCESSO!%RESET%
-echo %GREEN%=====================================================================%RESET%
-echo.
-echo O sistema está rodando nos seguintes endereços:
-echo.
-echo   %BLUE%Frontend:%RESET%  http://localhost:3000
-echo   %BLUE%Backend:%RESET%   http://localhost:3001/api
-echo   %BLUE%Database:%RESET%  http://localhost:8080
-echo.
-echo Os serviços foram configurados para iniciar automaticamente com o Windows.
-echo.
-echo Pressione qualquer tecla para fechar...
-pause >nul
 
+REM ============================================================================
+REM Sucesso
+REM ============================================================================
+echo =====================================================================
+echo [OK] INSTALACAO CONCLUIDA COM SUCESSO!
+echo =====================================================================
+echo.
+echo Proximo passos:
+echo  1. Acesse: http://localhost:3000
+echo  2. Backend API: http://localhost:3001/api
+echo  3. Admin BD: http://localhost:8080
+echo.
+echo Para gerenciar o sistema, execute:
+echo  %DESKTOP%\Sistema Emprestimos.bat
+echo.
+timeout /t 5 /nobreak >nul
 goto end
 
-REM ============================================================================
-REM Tratamento de erros
-REM ============================================================================
 :error_exit
 echo.
-echo %RED%=====================================================================%RESET%
-echo %RED% ERRO NA INSTALACAO%RESET%
-echo %RED%=====================================================================%RESET%
+echo =====================================================================
+echo [ERRO] FALHA NA INSTALACAO
+echo =====================================================================
 echo.
 echo Verifique o log de erros e tente novamente.
+echo Se o problema persistir, visite:
+echo  https://github.com/Th14g0R/emprestimo/issues
 echo.
-echo Pressione qualquer tecla para fechar...
-pause >nul
-exit /b 1
+timeout /t 10 /nobreak >nul
+goto end
 
 :end
 endlocal
-exit /b 0

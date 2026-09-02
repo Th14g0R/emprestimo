@@ -8,52 +8,44 @@ REM  ===========================================================================
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
-REM Cores para output
-for /F %%A in ('copy /Z "%~f0" nul') do set "BS=%%A"
-set "GREEN=[92m"
-set "RED=[91m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "RESET=[0m"
-
-title Gerenciador - Sistema de Empréstimos
+title Gerenciador - Sistema de Emprestimos
 
 REM ============================================================================
-REM Verificar privilégios de administrador
+REM Verificar privilegios de administrador
 REM ============================================================================
 echo.
-echo %BLUE%[*] Verificando privilégios de administrador...%RESET%
+echo [*] Verificando privilegios de administrador...
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %RED%[!] Este script requer privilégios de administrador!%RESET%
+    echo [!] Este script requer privilegios de administrador!
     powershell -Command "Start-Process cmd -ArgumentList '/c %~s0 %*' -Verb RunAs" >nul 2>&1
     exit /b
 )
 
 REM ============================================================================
-REM Definir variáveis
+REM Definir variaveis
 REM ============================================================================
 set "INSTALL_DIR=%ProgramFiles%\SistemaEmprestimos"
 set "SERVICE_NAME=SistemaEmprestimosBackend"
 set "FRONTEND_SERVICE_NAME=SistemaEmprestimosFrontend"
 
 REM ============================================================================
-REM Menu de opções
+REM Menu de opcoes
 REM ============================================================================
 :menu
 cls
 echo.
-echo %BLUE%=====================================================================%RESET%
-echo %BLUE%  GERENCIADOR - Sistema de Controle de Empréstimos%RESET%
-echo %BLUE%=====================================================================%RESET%
+echo =====================================================================
+echo  GERENCIADOR - Sistema de Controle de Emprestimos
+echo =====================================================================
 echo.
-echo Selecione uma operação:
+echo Selecione uma operacao:
 echo.
-echo  1 - Iniciar serviços
-echo  2 - Parar serviços
-echo  3 - Reiniciar serviços
-echo  4 - Ver status dos serviços
+echo  1 - Iniciar servicos
+echo  2 - Parar servicos
+echo  3 - Reiniciar servicos
+echo  4 - Ver status dos servicos
 echo  5 - Abrir Frontend (http://localhost:3000^)
 echo  6 - Abrir Backend API (http://localhost:3001/api^)
 echo  7 - Abrir Database Admin (http://localhost:8080^)
@@ -61,7 +53,7 @@ echo  8 - Ver logs Backend
 echo  9 - Ver logs Frontend
 echo  0 - Sair
 echo.
-set /p choice="Digite a opção desejada: "
+set /p choice="Digite a opcao desejada: "
 
 if "%choice%"=="1" goto start_services
 if "%choice%"=="2" goto stop_services
@@ -76,178 +68,217 @@ if "%choice%"=="0" goto end
 goto menu
 
 REM ============================================================================
-REM Iniciar serviços
+REM Iniciar servicos
 REM ============================================================================
 :start_services
 echo.
-echo %BLUE%Iniciando serviços...%RESET%
-echo.
-
-echo Iniciando Backend...
+echo [!] Iniciando Backend...
 net start "%SERVICE_NAME%" >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Backend iniciado com sucesso%RESET%
+if %errorlevel% equ 0 (
+    echo [OK] Backend iniciado
 ) else (
-    echo %YELLOW%[!] Backend já está rodando ou erro ao iniciar%RESET%
+    echo [!] Backend nao pode ser iniciado (talvez ja esteja rodando^)
 )
 
-echo Iniciando Frontend...
+echo [!] Iniciando Frontend...
 net start "%FRONTEND_SERVICE_NAME%" >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Frontend iniciado com sucesso%RESET%
+if %errorlevel% equ 0 (
+    echo [OK] Frontend iniciado
 ) else (
-    echo %YELLOW%[!] Frontend já está rodando ou erro ao iniciar%RESET%
+    echo [!] Frontend nao pode ser iniciado (talvez ja esteja rodando^)
 )
 
-timeout /t 2 >nul
+echo [!] Iniciando Docker...
+docker-compose -f "%INSTALL_DIR%\docker-compose.yml" up -d >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [OK] Docker Compose iniciado
+) else (
+    echo [!] Docker nao pode ser iniciado
+)
+
+echo.
+echo [OK] Servicos iniciados
+echo Acesse: http://localhost:3000
+echo.
+timeout /t 3 /nobreak >nul
 goto menu
 
 REM ============================================================================
-REM Parar serviços
+REM Parar servicos
 REM ============================================================================
 :stop_services
 echo.
-echo %BLUE%Parando serviços...%RESET%
+echo [!] Parando Backend...
+net stop "%SERVICE_NAME%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [OK] Backend parado
+) else (
+    echo [!] Backend nao pode ser parado
+)
+
+echo [!] Parando Frontend...
+net stop "%FRONTEND_SERVICE_NAME%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [OK] Frontend parado
+) else (
+    echo [!] Frontend nao pode ser parado
+)
+
+echo [!] Parando Docker...
+docker-compose -f "%INSTALL_DIR%\docker-compose.yml" down >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [OK] Docker Compose parado
+) else (
+    echo [!] Docker nao pode ser parado
+)
+
 echo.
-
-echo Parando Backend...
-net stop "%SERVICE_NAME%" /y >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Backend parado com sucesso%RESET%
-) else (
-    echo %YELLOW%[!] Backend pode não estar rodando%RESET%
-)
-
-echo Parando Frontend...
-net stop "%FRONTEND_SERVICE_NAME%" /y >nul 2>&1
-if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Frontend parado com sucesso%RESET%
-) else (
-    echo %YELLOW%[!] Frontend pode não estar rodando%RESET%
-)
-
-timeout /t 2 >nul
+echo [OK] Servicos parados
+echo.
+timeout /t 3 /nobreak >nul
 goto menu
 
 REM ============================================================================
-REM Reiniciar serviços
+REM Reiniciar servicos
 REM ============================================================================
 :restart_services
 echo.
-echo %BLUE%Reiniciando serviços...%RESET%
-echo.
-
+echo [!] Reiniciando servicos...
 call :stop_services
-timeout /t 3 >nul
+timeout /t 2 /nobreak >nul
 call :start_services
-
+echo.
+timeout /t 3 /nobreak >nul
 goto menu
 
 REM ============================================================================
-REM Ver status dos serviços
+REM Ver status dos servicos
 REM ============================================================================
 :service_status
 echo.
-echo %BLUE%Status dos serviços:%RESET%
+echo =====================================================================
+echo  STATUS DOS SERVICOS
+echo =====================================================================
 echo.
 
-for /f "tokens=3" %%i in ('sc query "%SERVICE_NAME%" ^| find "STATE"') do (
-    if "%%i"=="RUNNING" (
-        echo %GREEN%[✓] Backend: RODANDO%RESET%
-    ) else if "%%i"=="STOPPED" (
-        echo %RED%[✗] Backend: PARADO%RESET%
-    ) else (
-        echo %YELLOW%[!] Backend: %%i%RESET%
+echo Backend (%SERVICE_NAME%^):
+sc query "%SERVICE_NAME%" >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "tokens=3" %%i in ('sc query "%SERVICE_NAME%" ^| find "STATE"') do (
+        if "%%i"=="RUNNING" (
+            echo   Status: OK [RUNNING]
+        ) else if "%%i"=="STOPPED" (
+            echo   Status: PARADO [STOPPED]
+        ) else (
+            echo   Status: %%i
+        )
     )
-)
-
-for /f "tokens=3" %%i in ('sc query "%FRONTEND_SERVICE_NAME%" ^| find "STATE"') do (
-    if "%%i"=="RUNNING" (
-        echo %GREEN%[✓] Frontend: RODANDO%RESET%
-    ) else if "%%i"=="STOPPED" (
-        echo %RED%[✗] Frontend: PARADO%RESET%
-    ) else (
-        echo %YELLOW%[!] Frontend: %%i%RESET%
-    )
+) else (
+    echo   Status: SERVICO NAO ENCONTRADO
 )
 
 echo.
-echo Pressione uma tecla para continuar...
-pause >nul
+echo Frontend (%FRONTEND_SERVICE_NAME%^):
+sc query "%FRONTEND_SERVICE_NAME%" >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "tokens=3" %%i in ('sc query "%FRONTEND_SERVICE_NAME%" ^| find "STATE"') do (
+        if "%%i"=="RUNNING" (
+            echo   Status: OK [RUNNING]
+        ) else if "%%i"=="STOPPED" (
+            echo   Status: PARADO [STOPPED]
+        ) else (
+            echo   Status: %%i
+        )
+    )
+) else (
+    echo   Status: SERVICO NAO ENCONTRADO
+)
+
+echo.
+echo Docker Compose:
+docker ps --format "table {{.Names}}\t{{.Status}}" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   Status: OK [RUNNING]
+    echo.
+    docker ps --format "table {{.Names}}\t{{.Status}}"
+) else (
+    echo   Status: PARADO ou NAO ENCONTRADO
+)
+
+echo.
+timeout /t 5 /nobreak >nul
 goto menu
 
 REM ============================================================================
-REM Abrir aplicações
+REM Abrir Frontend
 REM ============================================================================
 :open_frontend
+echo.
+echo [!] Abrindo navegador em http://localhost:3000...
 start http://localhost:3000
-echo Frontend abrindo em seu navegador...
-timeout /t 2 >nul
-goto menu
-
-:open_backend
-start http://localhost:3001/api
-echo Backend API abrindo em seu navegador...
-timeout /t 2 >nul
-goto menu
-
-:open_database
-start http://localhost:8080
-echo Adminer (Database Admin) abrindo em seu navegador...
-timeout /t 2 >nul
+timeout /t 2 /nobreak >nul
 goto menu
 
 REM ============================================================================
-REM Ver logs
+REM Abrir Backend API
+REM ============================================================================
+:open_backend
+echo.
+echo [!] Abrindo navegador em http://localhost:3001/api...
+start http://localhost:3001/api
+timeout /t 2 /nobreak >nul
+goto menu
+
+REM ============================================================================
+REM Abrir Database Admin
+REM ============================================================================
+:open_database
+echo.
+echo [!] Abrindo navegador em http://localhost:8080...
+start http://localhost:8080
+timeout /t 2 /nobreak >nul
+goto menu
+
+REM ============================================================================
+REM Ver logs Backend
 REM ============================================================================
 :view_backend_logs
 echo.
-echo %BLUE%Logs do Backend (últimas 50 linhas):%%RESET%
+echo [!] Exibindo logs do Backend...
 echo.
 
-if exist "%INSTALL_DIR%\apps\backend\logs\*.log" (
-    for %%F in ("%INSTALL_DIR%\apps\backend\logs\*.log") do (
-        echo Arquivo: %%F
-        echo ---
-        for /f "skip=END tokens=*" %%A in ('find /v "" ^<"%%F" ^| find /c /v ""') do set lines=%%A
-        if !lines! gtr 50 (
-            more +!lines:-50=0! "%%F"
-        ) else (
-            type "%%F"
-        )
-    )
+if exist "%INSTALL_DIR%\backend.log" (
+    type "%INSTALL_DIR%\backend.log"
 ) else (
-    echo %YELLOW%Nenhum arquivo de log encontrado%RESET%
+    echo Arquivo de log nao encontrado: %INSTALL_DIR%\backend.log
+    echo.
+    echo Tentando obter logs do servico...
+    wevtutil qe System /q:"Event[System[Provider[@Name='Service Control Manager'] and EventID=7036 and TimeCreated[timediff(@SystemTime) &lt; 3600000]]]" /f:text /c:10 2>nul
 )
 
 echo.
-echo Pressione uma tecla para continuar...
-pause >nul
+timeout /t 5 /nobreak >nul
 goto menu
 
+REM ============================================================================
+REM Ver logs Frontend
+REM ============================================================================
 :view_frontend_logs
 echo.
-echo %BLUE%Logs do Frontend (últimas 50 linhas):%%RESET%
+echo [!] Exibindo logs do Frontend...
 echo.
 
-if exist "%INSTALL_DIR%\apps\frontend\logs\*.log" (
-    for %%F in ("%INSTALL_DIR%\apps\frontend\logs\*.log") do (
-        echo Arquivo: %%F
-        echo ---
-        for /f "skip=END tokens=*" %%A in ('find /v "" ^<"%%F" ^| find /c /v ""') do set lines=%%A
-        if !lines! gtr 50 (
-            more +!lines:-50=0! "%%F"
-        ) else (
-            type "%%F"
-        )
-    )
+if exist "%INSTALL_DIR%\frontend.log" (
+    type "%INSTALL_DIR%\frontend.log"
 ) else (
-    echo %YELLOW%Nenhum arquivo de log encontrado%RESET%
+    echo Arquivo de log nao encontrado: %INSTALL_DIR%\frontend.log
+    echo.
+    echo Tentando obter logs do servico...
+    wevtutil qe System /q:"Event[System[Provider[@Name='Service Control Manager'] and EventID=7036 and TimeCreated[timediff(@SystemTime) &lt; 3600000]]]" /f:text /c:10 2>nul
 )
 
 echo.
-echo Pressione uma tecla para continuar...
-pause >nul
+timeout /t 5 /nobreak >nul
 goto menu
 
 REM ============================================================================
@@ -255,7 +286,7 @@ REM Sair
 REM ============================================================================
 :end
 echo.
-echo Até logo!
+echo [OK] Ate logo!
 echo.
+timeout /t 2 /nobreak >nul
 endlocal
-exit /b 0

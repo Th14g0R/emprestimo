@@ -8,58 +8,49 @@ REM  ===========================================================================
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
-REM Cores para output
-for /F %%A in ('copy /Z "%~f0" nul') do set "BS=%%A"
-set "GREEN=[92m"
-set "RED=[91m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "RESET=[0m"
-
-title Desinstalador - Sistema de Empréstimos
+title Desinstalador - Sistema de Emprestimos
 
 REM ============================================================================
-REM Verificar privilégios de administrador
+REM Verificar privilegios de administrador
 REM ============================================================================
 echo.
-echo %BLUE%[*] Verificando privilégios de administrador...%RESET%
+echo [*] Verificando privilegios de administrador...
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %RED%[!] Este script requer privilégios de administrador!%RESET%
+    echo [!] Este script requer privilegios de administrador!
     echo.
-    echo Solicitando privilégios...
+    echo Solicitando privilegios...
     powershell -Command "Start-Process cmd -ArgumentList '/c %~s0' -Verb RunAs" >nul 2>&1
     exit /b
 )
 
-echo %GREEN%[✓] Privilégios de administrador confirmados%RESET%
+echo [OK] Privilegios de administrador confirmados
 echo.
 
 REM ============================================================================
-REM Definir variáveis
+REM Definir variaveis
 REM ============================================================================
-setlocal enabledelayedexpansion
 set "INSTALL_DIR=%ProgramFiles%\SistemaEmprestimos"
 set "SERVICE_NAME=SistemaEmprestimosBackend"
 set "FRONTEND_SERVICE_NAME=SistemaEmprestimosFrontend"
 
-echo %BLUE%=====================================================================%RESET%
-echo %BLUE%  DESINSTALADOR - Sistema de Controle de Empréstimos%RESET%
-echo %BLUE%=====================================================================%RESET%
+echo =====================================================================
+echo  DESINSTALADOR - Sistema de Controle de Emprestimos
+echo =====================================================================
 echo.
-echo AVISO: Esta operação vai remover o sistema completamente!
+echo AVISO: Esta operacao vai remover o sistema completamente!
 echo.
-echo Diretório a ser removido: %INSTALL_DIR%
+echo Diretorio a ser removido: %INSTALL_DIR%
 echo.
 
 REM ============================================================================
-REM Confirmação
+REM Confirmacao
 REM ============================================================================
 set /p confirm="Deseja continuar? (S/N): "
 if /i not "%confirm%"=="S" (
     echo.
-    echo %YELLOW%Desinstalação cancelada%RESET%
+    echo Desinstalacao cancelada
     echo.
     pause >nul
     exit /b 0
@@ -68,10 +59,10 @@ if /i not "%confirm%"=="S" (
 echo.
 
 REM ============================================================================
-REM Verificar se o sistema está instalado
+REM Verificar se o sistema esta instalado
 REM ============================================================================
 if not exist "%INSTALL_DIR%" (
-    echo %RED%[!] Sistema não encontrado em: %INSTALL_DIR%%RESET%
+    echo [!] Sistema nao encontrado em: %INSTALL_DIR%
     echo.
     echo Nada a desinstalar.
     echo.

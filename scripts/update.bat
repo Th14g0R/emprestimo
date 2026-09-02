@@ -8,52 +8,43 @@ REM  ===========================================================================
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
-REM Cores para output
-for /F %%A in ('copy /Z "%~f0" nul') do set "BS=%%A"
-set "GREEN=[92m"
-set "RED=[91m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "RESET=[0m"
-
-title Atualizador - Sistema de Empréstimos
+title Atualizador - Sistema de Emprestimos
 
 REM ============================================================================
-REM Verificar privilégios de administrador
+REM Verificar privilegios de administrador
 REM ============================================================================
 echo.
-echo %BLUE%[*] Verificando privilégios de administrador...%RESET%
+echo [*] Verificando privilegios de administrador...
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo %RED%[!] Este script requer privilégios de administrador!%RESET%
+    echo [!] Este script requer privilegios de administrador!
     echo.
-    echo Solicitando privilégios...
+    echo Solicitando privilegios...
     powershell -Command "Start-Process cmd -ArgumentList '/c %~s0' -Verb RunAs" >nul 2>&1
     exit /b
 )
 
-echo %GREEN%[✓] Privilégios de administrador confirmados%RESET%
+echo [OK] Privilegios de administrador confirmados
 echo.
 
 REM ============================================================================
-REM Definir variáveis
+REM Definir variaveis
 REM ============================================================================
-setlocal enabledelayedexpansion
 set "INSTALL_DIR=%ProgramFiles%\SistemaEmprestimos"
 set "SERVICE_NAME=SistemaEmprestimosBackend"
 set "FRONTEND_SERVICE_NAME=SistemaEmprestimosFrontend"
 
-echo %BLUE%=====================================================================%RESET%
-echo %BLUE%  ATUALIZADOR - Sistema de Controle de Empréstimos%RESET%
-echo %BLUE%=====================================================================%RESET%
+echo =====================================================================
+echo  ATUALIZADOR - Sistema de Controle de Emprestimos
+echo =====================================================================
 echo.
 
 REM ============================================================================
 REM Verificar se o sistema está instalado
 REM ============================================================================
 if not exist "%INSTALL_DIR%" (
-    echo %RED%[!] Sistema não encontrado em: %INSTALL_DIR%%RESET%
+    echo [!] Sistema nao encontrado em: %INSTALL_DIR%
     echo.
     echo Execute o instalador primeiro.
     echo.
@@ -61,20 +52,20 @@ if not exist "%INSTALL_DIR%" (
     exit /b 1
 )
 
-echo %GREEN%[✓] Sistema encontrado em: %INSTALL_DIR%%RESET%
+echo [OK] Sistema encontrado em: %INSTALL_DIR%
 echo.
 
 REM ============================================================================
-REM Parar serviços
+REM Parar servicos
 REM ============================================================================
-echo %BLUE%[1/4] Parando serviços...%RESET%
+echo [1/4] Parando servicos...
 
 echo Parando Backend...
 net stop "%SERVICE_NAME%" /y >nul 2>&1
 if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Backend parado%RESET%
+    echo [OK] Backend parado
 ) else (
-    echo %YELLOW%[!] Aviso: Backend pode não estar rodando%RESET%
+    echo [!] Aviso: Backend pode nao estar rodando
 )
 
 timeout /t 2 >nul
@@ -82,9 +73,9 @@ timeout /t 2 >nul
 echo Parando Frontend...
 net stop "%FRONTEND_SERVICE_NAME%" /y >nul 2>&1
 if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Frontend parado%RESET%
+    echo [OK] Frontend parado
 ) else (
-    echo %YELLOW%[!] Aviso: Frontend pode não estar rodando%RESET%
+    echo [!] Aviso: Frontend pode nao estar rodando
 )
 
 timeout /t 2 >nul
@@ -93,17 +84,17 @@ echo Parando banco de dados...
 cd /d "%INSTALL_DIR%"
 docker-compose down >nul 2>&1
 if !errorlevel! equ 0 (
-    echo %GREEN%[✓] Banco de dados parado%RESET%
+    echo [OK] Banco de dados parado
 ) else (
-    echo %YELLOW%[!] Aviso: Banco pode não estar rodando%RESET%
+    echo [!] Aviso: Banco pode nao estar rodando
 )
 
 echo.
 
 REM ============================================================================
-REM Atualizar código via Git
+REM Atualizar codigo via Git
 REM ============================================================================
-echo %BLUE%[2/4] Atualizando código...%RESET%
+echo [2/4] Atualizando codigo...
 
 cd /d "%INSTALL_DIR%"
 
@@ -112,42 +103,42 @@ if exist .git (
     git pull >nul 2>&1
     
     if !errorlevel! equ 0 (
-        echo %GREEN%[✓] Código atualizado%RESET%
+        echo [OK] Codigo atualizado
     ) else (
-        echo %YELLOW%[!] Falha ao atualizar via Git. Usando atualização manual.%RESET%
+        echo [!] Falha ao atualizar via Git. Usando atualizacao manual.
     )
 ) else (
-    echo %YELLOW%[!] Repositório Git não encontrado%RESET%
+    echo [!] Repositorio Git nao encontrado
 )
 
 echo.
 
 REM ============================================================================
-REM Atualizar dependências
+REM Atualizar dependencias
 REM ============================================================================
-echo %BLUE%[3/4] Atualizando dependências...%RESET%
+echo [3/4] Atualizando dependencias...
 
 if exist package.json (
     echo Executando: npm install
     call npm install >nul 2>&1
     
     if !errorlevel! equ 0 (
-        echo %GREEN%[✓] Dependências atualizadas%RESET%
+        echo [OK] Dependencias atualizadas
     ) else (
-        echo %RED%[!] Erro ao atualizar dependências%RESET%
+        echo [ERRO] Erro ao atualizar dependencias
         goto error_exit
     )
 ) else (
-    echo %RED%[!] arquivo package.json não encontrado%RESET%
+    echo [ERRO] arquivo package.json nao encontrado
     goto error_exit
 )
 
 echo.
 
 REM ============================================================================
-REM Executar migrations (se necessário)
+REM Executar migrations (se necessario)
 REM ============================================================================
-echo %BLUE%[4/4] Aplicando migrations...%RESET%
+echo [4/4] Aplicando migrations...
 
 if exist apps\backend\prisma\schema.prisma (
     echo Iniciando banco de dados...
