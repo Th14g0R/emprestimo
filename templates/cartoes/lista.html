@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Cartões de crédito{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Cartões de crédito</h1><p class="muted">Controle independente dos empréstimos, com compras parceladas e pagamentos.</p></div><a class="button" href="{{ url_for('cartoes_novo') }}">Novo cartão</a></div>
+<form method="get" class="card filters filters-bank"><input name="q" value="{{ termo }}" placeholder="Cliente ou cartão"><select name="status"><option value="ativos" {{ 'selected' if status=='ativos' }}>Ativos</option><option value="inativos" {{ 'selected' if status=='inativos' }}>Inativos</option><option value="todos" {{ 'selected' if status=='todos' }}>Todos</option></select><button class="button" type="submit">Filtrar</button></form>
+<section class="card section-card">
+{% if cartoes %}<div class="table-responsive"><table><thead><tr><th>Cliente</th><th>Cartão</th><th class="text-right">Parcelado</th><th class="text-right">Pago</th><th class="text-right">Em aberto</th><th>Status</th></tr></thead><tbody>
+{% for cartao in cartoes %}<tr><td>{{ cartao['cliente_nome'] }}</td><td><a href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">{{ cartao['descricao'] }}</a></td><td class="text-right">{{ cartao['total_parcelado_centavos']|money }}</td><td class="text-right">{{ cartao['pago_centavos']|money }}</td><td class="text-right">{{ cartao['aberto_centavos']|money }}</td><td>{{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<div class="empty-state">Nenhum cartão cadastrado.</div>{% endif %}
+</section>
+{% endblock %}

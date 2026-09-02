@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Contas bancárias{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Contas bancárias</h1>
+        <p class="muted">Contas próprias e contas dos clientes usadas nas movimentações financeiras.</p>
+    </div>
+    <div class="actions">
+        <a class="button" href="{{ url_for('contas_nova', tipo='NOSSA') }}">Nova conta própria</a>
+        <a class="button button-secondary" href="{{ url_for('contas_nova', tipo='CLIENTE') }}">Nova conta de cliente</a>
+    </div>
+</div>
+
+<form method="get" class="card filters filters-bank">
+    <input type="search" name="q" value="{{ termo }}" placeholder="Banco, cliente, descrição ou PIX">
+    <select name="tipo">
+        <option value="todas" {{ 'selected' if tipo == 'todas' }}>Todas</option>
+        <option value="nossas" {{ 'selected' if tipo == 'nossas' }}>Minhas contas</option>
+        <option value="clientes" {{ 'selected' if tipo == 'clientes' }}>Contas de clientes</option>
+    </select>
+    <button class="button" type="submit">Filtrar</button>
+</form>
+
+<section class="card section-card">
+{% if contas %}
+<div class="table-responsive">
+<table>
+    <thead><tr><th>Titular</th><th>Banco</th><th>Descrição</th><th>PIX</th><th>Ag./Conta</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for conta in contas %}
+    <tr>
+        <td>{% if conta['tipo_titular'] == 'NOSSA' %}<strong>Própria</strong>{% else %}<a href="{{ url_for('clientes_detalhe', cliente_id=conta['cliente_id']) }}">{{ conta['cliente_nome'] }}</a>{% endif %}</td>
+        <td>{{ conta['banco'] }} {% if conta['principal'] %}<span class="badge badge-ativo">Padrão</span>{% endif %}</td>
+        <td>{{ conta['descricao'] or '-' }}</td>
+        <td>{{ conta['chave_pix'] or '-' }}</td>
+        <td>{{ conta['agencia'] or '-' }} / {{ conta['conta'] or '-' }}</td>
+        <td>{{ 'Ativa' if conta['ativo'] else 'Inativa' }}</td>
+        <td class="text-right">
+            <div class="actions compact-actions">
+                <a class="button button-small button-light" href="{{ url_for('contas_editar', conta_id=conta['id']) }}">Editar</a>
+                <form method="post" action="{{ url_for('contas_status', conta_id=conta['id']) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button class="button button-small {{ 'button-danger' if conta['ativo'] else 'button-secondary' }}" type="submit">{{ 'Inativar' if conta['ativo'] else 'Ativar' }}</button>
+                </form>
+            </div>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}<div class="empty-state">Nenhuma conta bancária encontrada.</div>{% endif %}
+</section>
+{% endblock %}

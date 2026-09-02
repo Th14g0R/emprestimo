@@ -1,0 +1,16 @@
+# Hotfix GitHub Authentication v3
+
+Substitua no projeto:
+
+- Publicar-GitHub.bat
+- scripts/Publicar-GitHub.ps1
+
+Mudança principal:
+- se o `git push` falhar por autenticação, o script oferece login via
+  Git Credential Manager e navegador;
+- depois do login, repete o push automaticamente;
+- não solicita senha comum do GitHub;
+- mantém banco SQLite e `.secret_key` fora do Git.
+
+Se ainda houver `Invalid username or token`, remova credenciais antigas de
+github.com no Gerenciador de Credenciais do Windows e execute novamente.

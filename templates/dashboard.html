@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Dashboard</h1>
+        <p class="muted">Visão geral da carteira e dos recebimentos.</p>
+    </div>
+    <div class="actions">
+        <a class="button" href="{{ url_for('emprestimos_novo') }}">Novo empréstimo</a>
+    </div>
+</div>
+
+<div class="metrics-grid metrics-grid-7">
+    <div class="card metric-card">
+        <span>Clientes ativos</span>
+        <strong>{{ metrics['clientes_ativos'] }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Empréstimos em aberto</span>
+        <strong>{{ metrics['emprestimos_ativos'] }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Total emprestado</span>
+        <strong>{{ metrics['total_emprestado_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Saldo devedor</span>
+        <strong>{{ metrics['saldo_devedor_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Juros no mês</span>
+        <strong>{{ metrics['juros_mes_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Abatimentos no mês</span>
+        <strong>{{ metrics['abatimentos_mes_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Recebimentos no mês</span>
+        <strong>{{ metrics['recebimentos_mes_centavos']|money }}</strong>
+    </div>
+</div>
+
+<div class="dashboard-columns">
+<section class="card section-card">
+    <div class="section-title-row">
+        <div>
+            <h2>Últimos empréstimos</h2>
+            <p class="muted section-subtitle">Contratos cadastrados mais recentemente.</p>
+        </div>
+        <a class="button button-secondary button-small" href="{{ url_for('emprestimos_lista') }}">Ver todos</a>
+    </div>
+
+    {% if ultimos_emprestimos %}
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Data</th>
+                        <th>Cliente</th>
+                        <th class="text-right">Saldo</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for emprestimo in ultimos_emprestimos %}
+                    <tr>
+                        <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">{{ emprestimo['id'] }}</a></td>
+                        <td>{{ emprestimo['data_emprestimo']|date_br }}</td>
+                        <td><a href="{{ url_for('clientes_detalhe', cliente_id=emprestimo['cliente_id']) }}">{{ emprestimo['cliente_nome'] }}</a></td>
+                        <td class="text-right">{{ emprestimo['saldo_atual_centavos']|money }}</td>
+                        <td><span class="badge badge-{{ emprestimo['status']|lower }}">{{ emprestimo['status'] }}</span></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">Nenhum empréstimo cadastrado.</div>
+    {% endif %}
+</section>
+
+<section class="card section-card">
+    <div class="section-title-row">
+        <div>
+            <h2>Movimentações recentes</h2>
+            <p class="muted section-subtitle">Juros, abatimentos e quitações.</p>
+        </div>
+        <a class="button button-secondary button-small" href="{{ url_for('movimentacoes_lista') }}">Histórico</a>
+    </div>
+
+    {% if ultimas_movimentacoes %}
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Cliente</th>
+                        <th>Tipo</th>
+                        <th class="text-right">Valor</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for mov in ultimas_movimentacoes %}
+                    <tr>
+                        <td>{{ mov['data_movimento']|date_br }}</td>
+                        <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=mov['emprestimo_id']) }}">{{ mov['cliente_nome'] }}</a></td>
+                        <td><span class="badge badge-{{ mov['tipo']|lower }}">{{ mov['tipo'] }}</span></td>
+                        <td class="text-right">{{ mov['valor_centavos']|money }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">Ainda não existem movimentações financeiras.</div>
+    {% endif %}
+</section>
+</div>
+{% endblock %}

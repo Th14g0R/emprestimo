@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ titulo }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{{ titulo }}</h1>
+        <p class="muted">Preencha os dados abaixo.</p>
+    </div>
+</div>
+
+<section class="card section-card">
+    <form method="post" class="form-grid form-grid-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label class="field-span-2">
+            Nome *
+            <input type="text" name="nome" maxlength="150" required autofocus value="{{ cliente['nome'] if cliente else '' }}">
+        </label>
+
+        <label>
+            CPF
+            <input type="text" name="cpf" inputmode="numeric" maxlength="14" value="{{ cliente['cpf'] or '' if cliente else '' }}">
+        </label>
+
+        <label>
+            Telefone
+            <input type="text" name="telefone" inputmode="tel" maxlength="20" value="{{ cliente['telefone'] or '' if cliente else '' }}">
+        </label>
+
+        <label class="field-span-2">
+            E-mail
+            <input type="email" name="email" maxlength="150" value="{{ cliente['email'] or '' if cliente else '' }}">
+        </label>
+
+        <label class="field-span-2">
+            Endereço
+            <input type="text" name="endereco" maxlength="200" value="{{ cliente['endereco'] or '' if cliente else '' }}">
+        </label>
+
+        <label>
+            Cidade
+            <input type="text" name="cidade" maxlength="100" value="{{ cliente['cidade'] or '' if cliente else '' }}">
+        </label>
+
+        <label>
+            Estado
+            <input type="text" name="estado" maxlength="2" placeholder="CE" value="{{ cliente['estado'] or '' if cliente else '' }}">
+        </label>
+
+        <label>
+            CEP
+            <input type="text" name="cep" inputmode="numeric" maxlength="9" value="{{ cliente['cep'] or '' if cliente else '' }}">
+        </label>
+
+        <label class="field-span-2">
+            Observações
+            <textarea name="observacoes" rows="4" maxlength="2000">{{ cliente['observacoes'] or '' if cliente else '' }}</textarea>
+        </label>
+
+        <div class="form-actions field-span-2">
+            <a class="button button-light" href="{{ url_for('clientes_lista') }}">Cancelar</a>
+            <button class="button" type="submit">Salvar</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

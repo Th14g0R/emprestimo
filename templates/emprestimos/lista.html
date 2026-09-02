@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Empréstimos{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Empréstimos</h1>
+        <p class="muted">Carteira de contratos e saldos devedores.</p>
+    </div>
+    <a class="button" href="{{ url_for('emprestimos_novo') }}">Novo empréstimo</a>
+</div>
+
+<section class="card section-card">
+    <form class="filters filters-loans" method="get">
+        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, descrição ou número">
+        <select name="status">
+            <option value="ativos" {{ 'selected' if status == 'ativos' }}>Ativos</option>
+            <option value="quitados" {{ 'selected' if status == 'quitados' }}>Quitados</option>
+            <option value="vencidos" {{ 'selected' if status == 'vencidos' }}>Vencidos</option>
+            <option value="todos" {{ 'selected' if status == 'todos' }}>Todos</option>
+        </select>
+        <button class="button button-secondary" type="submit">Filtrar</button>
+    </form>
+</section>
+
+<section class="card table-card">
+    {% if emprestimos %}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Data</th>
+                    <th>Cliente</th>
+                    <th>Descrição</th>
+                    <th class="text-right">Original</th>
+                    <th class="text-right">Saldo</th>
+                    <th class="text-right">Juros/mês</th>
+                    <th>1º vencimento</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for emprestimo in emprestimos %}
+                <tr>
+                    <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">{{ emprestimo['id'] }}</a></td>
+                    <td>{{ emprestimo['data_emprestimo']|date_br }}</td>
+                    <td><a href="{{ url_for('clientes_detalhe', cliente_id=emprestimo['cliente_id']) }}">{{ emprestimo['cliente_nome'] }}</a></td>
+                    <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">{{ emprestimo['descricao'] or '-' }}</a></td>
+                    <td class="text-right">{{ emprestimo['valor_original_centavos']|money }}</td>
+                    <td class="text-right"><strong>{{ emprestimo['saldo_atual_centavos']|money }}</strong></td>
+                    <td class="text-right">{{ emprestimo['taxa_juros_mensal']|percent_br }}</td>
+                    <td>{{ emprestimo['data_primeiro_vencimento']|date_br }}</td>
+                    <td><span class="badge badge-{{ emprestimo['status']|lower }}">{{ emprestimo['status'] }}</span></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhum empréstimo encontrado para o filtro informado.</div>
+    {% endif %}
+</section>
+{% endblock %}

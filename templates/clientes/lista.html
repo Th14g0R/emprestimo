@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Clientes{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Clientes</h1>
+        <p class="muted">Cadastro e consulta de clientes.</p>
+    </div>
+    <a class="button" href="{{ url_for('clientes_novo') }}">Novo cliente</a>
+</div>
+
+<section class="card section-card">
+    <form method="get" class="filters">
+        <input type="search" name="q" placeholder="Nome, CPF, telefone ou e-mail" value="{{ termo }}">
+        <select name="status">
+            <option value="ativos" {% if status == 'ativos' %}selected{% endif %}>Ativos</option>
+            <option value="inativos" {% if status == 'inativos' %}selected{% endif %}>Inativos</option>
+            <option value="todos" {% if status == 'todos' %}selected{% endif %}>Todos</option>
+        </select>
+        <button class="button button-secondary" type="submit">Pesquisar</button>
+    </form>
+</section>
+
+<section class="card table-card">
+    {% if clientes %}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Nome</th>
+                    <th>Telefone</th>
+                    <th>CPF</th>
+                    <th>Cidade</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cliente in clientes %}
+                <tr>
+                    <td>{{ cliente['nome'] }}</td>
+                    <td>{{ cliente['telefone'] or '-' }}</td>
+                    <td>{{ cliente['cpf'] or '-' }}</td>
+                    <td>
+                        {{ cliente['cidade'] or '-' }}
+                        {% if cliente['estado'] %}/{{ cliente['estado'] }}{% endif %}
+                    </td>
+                    <td>
+                        <span class="badge {{ 'badge-success' if cliente['ativo'] else 'badge-muted' }}">
+                            {{ 'Ativo' if cliente['ativo'] else 'Inativo' }}
+                        </span>
+                    </td>
+                    <td class="text-right">
+                        <a class="button button-light button-small" href="{{ url_for('clientes_detalhe', cliente_id=cliente['id']) }}">Abrir</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhum cliente encontrado.</div>
+    {% endif %}
+</section>
+{% endblock %}

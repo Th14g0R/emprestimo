@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ operacao|title }} - Empréstimo #{{ emprestimo['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{% if operacao == 'JUROS' %}Lançar juros{% elif operacao == 'ABATIMENTO' %}Registrar abatimento{% else %}Quitar empréstimo{% endif %}</h1>
+        <p class="muted">Empréstimo #{{ emprestimo['id'] }} · {{ emprestimo['cliente_nome'] }}</p>
+    </div>
+    <a class="button button-light" href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">Cancelar</a>
+</div>
+
+<div class="financial-operation-grid">
+<section class="card section-card">
+    <h2>Resumo atual</h2>
+    <dl class="details">
+        <dt>Saldo atual</dt><dd><strong>{{ emprestimo['saldo_atual_centavos']|money }}</strong></dd>
+        <dt>Taxa mensal</dt><dd>{{ emprestimo['taxa_juros_mensal']|percent_br }}</dd>
+        <dt>Status</dt><dd>{{ emprestimo['status'] }}</dd>
+    </dl>
+
+    {% if operacao == 'JUROS' %}
+        <div class="calculation-box">
+            <span>Juros integrais calculados sobre o saldo atual</span>
+            <strong>{{ valor_calculado_centavos|money }}</strong>
+            <small>O valor não pode ser fracionado e não altera o saldo principal.</small>
+        </div>
+    {% elif operacao == 'QUITACAO' %}
+        <div class="calculation-box danger-calculation">
+            <span>Valor integral da quitação</span>
+            <strong>{{ valor_calculado_centavos|money }}</strong>
+            <small>Após confirmar, o saldo será zerado e o contrato ficará QUITADO.</small>
+        </div>
+    {% endif %}
+</section>
+
+<section class="card section-card">
+    <form method="post" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label>
+            Data da movimentação
+            <input type="date" name="data_movimento" value="{{ form['data_movimento'] }}" required>
+        </label>
+
+        {% if operacao == 'JUROS' %}
+        <label>
+            Competência
+            <input type="month" name="competencia" value="{{ form['competencia'] }}" required>
+            <small class="field-help">Um único lançamento integral de juros por empréstimo e competência.</small>
+        </label>
+        {% endif %}
+
+        {% if operacao == 'ABATIMENTO' %}
+        <label>
+            Valor do abatimento
+            <input type="text" name="valor" value="{{ form['valor'] }}" placeholder="Ex.: 1.500,00" inputmode="decimal" required autofocus>
+            <small class="field-help">Pode haver vários abatimentos no mesmo mês. Para zerar o saldo, use Quitação.</small>
+        </label>
+        {% endif %}
+
+        <h3 class="field-span-2 form-section-title">Origem e destino do recebimento</h3>
+        <label>
+            Valor saiu da conta do cliente
+            <select name="conta_origem_id" required>
+                <option value="">Selecione...</option>
+                {% for conta in contas_cliente %}
+                    <option value="{{ conta['id'] }}" {{ 'selected' if form['conta_origem_id'] == conta['id'] }}>
+                        {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            {% if not contas_cliente %}<small class="text-danger">Cadastre uma conta bancária para este cliente.</small>{% endif %}
+        </label>
+
+        <label>
+            Você recebeu em qual conta?
+            <select name="conta_destino_id" required>
+                <option value="">Selecione...</option>
+                {% for conta in contas_proprias %}
+                    <option value="{{ conta['id'] }}" {{ 'selected' if form['conta_destino_id'] == conta['id'] }}>
+                        {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            {% if not contas_proprias %}<small class="text-danger">Cadastre uma conta própria para receber.</small>{% endif %}
+        </label>
+
+        <label class="field-span-2">
+            Observação
+            <textarea name="observacao" rows="4" maxlength="500" placeholder="Opcional">{{ form['observacao'] }}</textarea>
+        </label>
+
+        {% if operacao == 'QUITACAO' %}
+        <div class="alert alert-warning field-span-2">
+            Confirme somente se o valor integral do saldo foi recebido. Pagamentos parciais devem ser registrados como Abatimento.
+        </div>
+        {% endif %}
+
+        <div class="form-actions field-span-2">
+            <a class="button button-light" href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">Voltar</a>
+            <button class="button {{ 'button-danger' if operacao == 'QUITACAO' else '' }}" type="submit">
+                {% if operacao == 'JUROS' %}Confirmar juros integrais{% elif operacao == 'ABATIMENTO' %}Registrar abatimento{% else %}Confirmar quitação{% endif %}
+            </button>
+        </div>
+    </form>
+</section>
+</div>
+{% endblock %}

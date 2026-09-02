@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}{{ titulo }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{{ titulo }}</h1>
+        <p class="muted">O empréstimo é um contrato independente. A saída inicial também registra a conta de origem e a conta do cliente que recebeu o valor.</p>
+    </div>
+</div>
+
+<form method="post" class="card section-card" id="form-emprestimo">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="form-grid form-grid-2">
+        <label class="field-span-2">
+            Cliente
+            <select name="cliente_id" id="cliente_id" required autofocus>
+                <option value="">Selecione...</option>
+                {% for cliente in clientes %}
+                    <option value="{{ cliente['id'] }}" {{ 'selected' if emprestimo.get('cliente_id') == cliente['id'] }}>
+                        {{ cliente['nome'] }}{% if cliente['cpf'] %} — CPF {{ cliente['cpf'] }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field-span-2">
+            Descrição
+            <input type="text" name="descricao" maxlength="160" value="{{ emprestimo.get('descricao') or '' }}" placeholder="Ex.: Empréstimo pessoal setembro/2026">
+        </label>
+
+        <label>
+            Data do empréstimo
+            <input type="date" name="data_emprestimo" value="{{ emprestimo.get('data_emprestimo') or '' }}" required>
+        </label>
+
+        <label>
+            Primeiro vencimento
+            <input type="date" name="data_primeiro_vencimento" value="{{ emprestimo.get('data_primeiro_vencimento') or '' }}" required>
+        </label>
+
+        <label>
+            Valor original (R$)
+            <input type="text" inputmode="decimal" name="valor_original" value="{{ emprestimo.get('valor_original') or '' }}" placeholder="Ex.: 10.000,00" required>
+            <small>O banco grava o valor em centavos inteiros.</small>
+        </label>
+
+        <label>
+            Taxa de juros mensal (%)
+            <input type="text" inputmode="decimal" name="taxa_juros_mensal" value="{{ emprestimo.get('taxa_juros_mensal_input', emprestimo.get('taxa_juros_mensal', '')) or '' }}" placeholder="Ex.: 5,00" required>
+            <small>Informe somente a taxa mensal do contrato.</small>
+        </label>
+    </div>
+
+    <h2 class="form-section-title">Transferência do empréstimo</h2>
+    <div class="form-grid form-grid-2">
+        <label>
+            Saiu de qual conta sua?
+            <select name="conta_origem_id" required>
+                <option value="">Selecione...</option>
+                {% for conta in contas_proprias %}
+                    <option value="{{ conta['id'] }}" {{ 'selected' if emprestimo.get('conta_origem_id') == conta['id'] }}>
+                        {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            {% if not contas_proprias %}<small class="text-danger">Cadastre uma conta própria antes de concluir.</small>{% endif %}
+        </label>
+
+        <label>
+            Cliente recebeu em qual conta?
+            <select name="conta_destino_id" id="conta_destino_id" required>
+                <option value="">Selecione...</option>
+                {% for conta in contas_clientes %}
+                    <option value="{{ conta['id'] }}" data-cliente-id="{{ conta['cliente_id'] }}" {{ 'selected' if emprestimo.get('conta_destino_id') == conta['id'] }}>
+                        {{ conta['cliente_nome'] }} — {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+            <small>Somente contas pertencentes ao cliente selecionado podem ser usadas.</small>
+        </label>
+    </div>
+
+    <div class="info-box">
+        <strong>Ao salvar:</strong> o sistema cria o contrato, registra a movimentação <strong>EMPRESTIMO</strong> e grava de qual conta sua o dinheiro saiu e em qual conta/PIX do cliente ele entrou.
+    </div>
+
+    <div class="form-actions">
+        <a class="button button-light" href="{{ url_for('emprestimos_lista') }}">Cancelar</a>
+        <button class="button" type="submit">Cadastrar empréstimo</button>
+    </div>
+</form>
+
+<script>
+(function () {
+    const cliente = document.getElementById('cliente_id');
+    const destino = document.getElementById('conta_destino_id');
+    if (!cliente || !destino) return;
+    const options = Array.from(destino.options);
+
+    function filtrarContas() {
+        const clienteId = cliente.value;
+        let selectedVisible = false;
+        options.forEach((option, index) => {
+            if (index === 0) return;
+            const visible = option.dataset.clienteId === clienteId;
+            option.hidden = !visible;
+            option.disabled = !visible;
+            if (visible && option.selected) selectedVisible = true;
+        });
+        if (!selectedVisible) destino.value = '';
+    }
+    cliente.addEventListener('change', filtrarContas);
+    filtrarContas();
+})();
+</script>
+{% endblock %}

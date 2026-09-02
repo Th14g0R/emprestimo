@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Empréstimo #{{ emprestimo['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Empréstimo #{{ emprestimo['id'] }}</h1>
+        <p class="muted">{{ emprestimo['descricao'] or 'Contrato sem descrição' }}</p>
+    </div>
+    <div class="actions wrap-actions">
+        {% if emprestimo['status'] != 'QUITADO' and emprestimo['saldo_atual_centavos'] > 0 %}
+            <a class="button" href="{{ url_for('emprestimos_juros', emprestimo_id=emprestimo['id']) }}">Lançar juros</a>
+            <a class="button button-secondary" href="{{ url_for('emprestimos_abatimento', emprestimo_id=emprestimo['id']) }}">Abatimento</a>
+            <a class="button button-danger" href="{{ url_for('emprestimos_quitacao', emprestimo_id=emprestimo['id']) }}">Quitação</a>
+        {% endif %}
+        <a class="button button-light" href="{{ url_for('emprestimos_lista') }}">Voltar</a>
+    </div>
+</div>
+
+<div class="loan-summary-grid">
+    <div class="card metric-card">
+        <span>Valor original</span>
+        <strong>{{ emprestimo['valor_original_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Saldo atual</span>
+        <strong>{{ emprestimo['saldo_atual_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Taxa mensal</span>
+        <strong>{{ emprestimo['taxa_juros_mensal']|percent_br }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Juro sobre saldo atual</span>
+        <strong>{{ juros_atual_centavos|money }}</strong>
+    </div>
+</div>
+
+<div class="loan-secondary-metrics">
+    <div class="card compact-metric"><span>Juros registrados</span><strong>{{ resumo['juros_centavos']|money }}</strong></div>
+    <div class="card compact-metric"><span>Abatimentos</span><strong>{{ resumo['abatimentos_centavos']|money }}</strong></div>
+    <div class="card compact-metric"><span>Quitações</span><strong>{{ resumo['quitacoes_centavos']|money }}</strong></div>
+    <div class="card compact-metric"><span>Status</span><strong>{{ emprestimo['status'] }}</strong></div>
+</div>
+
+<div class="detail-grid loan-detail-grid">
+    <section class="card section-card">
+        <h2>Contrato</h2>
+        <dl class="details">
+            <dt>Cliente</dt>
+            <dd><a href="{{ url_for('clientes_detalhe', cliente_id=emprestimo['cliente_id']) }}">{{ emprestimo['cliente_nome'] }}</a></dd>
+            <dt>Data</dt><dd>{{ emprestimo['data_emprestimo']|date_br }}</dd>
+            <dt>1º vencimento</dt><dd>{{ emprestimo['data_primeiro_vencimento']|date_br }}</dd>
+            <dt>Dia mensal</dt><dd>{{ emprestimo['dia_vencimento'] or '-' }}</dd>
+            <dt>Descrição</dt><dd>{{ emprestimo['descricao'] or '-' }}</dd>
+        </dl>
+
+        <div class="info-box compact-info">
+            Os lançamentos financeiros permanecem imutáveis. Juros não reduzem o principal; somente abatimento e quitação alteram o saldo. Se futuramente for criada correção de valor já lançado, ela exigirá confirmação da senha do usuário logado.
+        </div>
+    </section>
+
+    <section class="card section-card">
+        <div class="section-title-row">
+            <div>
+                <h2>Movimentações</h2>
+                <p class="muted section-subtitle">Histórico financeiro auditável do contrato.</p>
+            </div>
+        </div>
+
+        {% if movimentacoes %}
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Tipo</th>
+                        <th>Competência</th>
+                        <th class="text-right">Valor</th>
+                        <th class="text-right">Saldo antes</th>
+                        <th class="text-right">Saldo depois</th>
+                        <th>Origem</th>
+                        <th>Destino</th>
+                        <th>Usuário</th>
+                        <th>Observação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for movimento in movimentacoes %}
+                    <tr>
+                        <td>{{ movimento['data_movimento']|date_br }}</td>
+                        <td><span class="badge badge-{{ movimento['tipo']|lower }}">{{ movimento['tipo'] }}</span></td>
+                        <td>{{ movimento['competencia']|competencia_br if movimento['tipo'] == 'JUROS' else '-' }}</td>
+                        <td class="text-right">{{ movimento['valor_centavos']|money }}</td>
+                        <td class="text-right">{{ movimento['saldo_antes_centavos']|money if movimento['saldo_antes_centavos'] is not none else '-' }}</td>
+                        <td class="text-right">{{ movimento['saldo_depois_centavos']|money if movimento['saldo_depois_centavos'] is not none else '-' }}</td>
+                        <td>{% if movimento['origem_banco'] %}{{ movimento['origem_banco'] }}{% if movimento['origem_pix'] %}<br><small>PIX {{ movimento['origem_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
+                        <td>{% if movimento['destino_banco'] %}{{ movimento['destino_banco'] }}{% if movimento['destino_pix'] %}<br><small>PIX {{ movimento['destino_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
+                        <td>{{ movimento['usuario_nome'] or '-' }}</td>
+                        <td>{{ movimento['observacao'] or '-' }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <div class="empty-state">Nenhuma movimentação encontrada.</div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

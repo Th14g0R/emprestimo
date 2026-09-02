@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+{% block content %}
+<div class="auth-wrapper">
+    <section class="card auth-card">
+        <h1>Sistema de Empréstimos</h1>
+        <p class="muted">Informe suas credenciais.</p>
+
+        <form method="post" class="form-grid">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <label>
+                Login
+                <input type="text" name="login" maxlength="60" required autofocus autocomplete="username" value="{{ login|default('') }}">
+            </label>
+
+            <label>
+                Senha
+                <input type="password" name="senha" required autocomplete="current-password">
+            </label>
+
+            <button class="button" type="submit">Entrar</button>
+        </form>
+    </section>
+</div>
+{% endblock %}

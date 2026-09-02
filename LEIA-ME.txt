@@ -1,0 +1,59 @@
+SISTEMA DE EMPRÉSTIMOS — PASSO 9.1 + PASSO 10
+================================================
+
+Esta versão mantém tudo em Python + Flask + SQLite e continua iniciando com:
+
+    python app.py
+
+O QUE FOI ADICIONADO
+--------------------
+1. Contas bancárias próprias e de clientes.
+2. Banco, agência, conta, tipo de conta, chave PIX e conta padrão.
+3. Origem/destino obrigatórios nas novas movimentações financeiras.
+4. Snapshot do banco e PIX no momento da movimentação para preservar o histórico.
+5. Empréstimo: dinheiro sai de conta própria e entra em conta do cliente.
+6. Juros/abatimento/quitação: dinheiro sai de conta do cliente e entra em conta própria.
+7. Juros continuam integrais: uma movimentação por competência e empréstimo.
+8. Abatimentos podem ocorrer várias vezes no mesmo mês.
+9. Quitação continua sendo apenas o pagamento integral do saldo restante.
+10. Módulo Cartões de Crédito:
+    - cadastro de cartão por cliente;
+    - lançamento de compras;
+    - geração automática de parcelas;
+    - rateio exato de centavos;
+    - vencimentos mensais;
+    - status PENDENTE/VENCIDO/PAGO;
+    - pagamento integral da parcela;
+    - origem/destino bancário no pagamento.
+
+ATUALIZAÇÃO DO SEU PROJETO
+--------------------------
+1. Pare o servidor (CTRL+C).
+2. Faça backup da pasta data, especialmente:
+       data\emprestimos.db
+       data\.secret_key
+3. Substitua app.py, templates e static pelos arquivos deste pacote.
+4. NÃO apague a sua pasta data existente.
+5. Execute:
+       python app.py
+
+O app.py atualiza o schema existente automaticamente sem apagar os dados.
+
+ORDEM RECOMENDADA DE TESTE
+--------------------------
+1. Menu Contas -> cadastrar pelo menos uma conta própria.
+2. Abrir um cliente -> cadastrar pelo menos uma conta bancária dele.
+3. Criar um novo empréstimo informando origem e destino.
+4. Registrar juros e conferir origem/destino.
+5. Registrar dois abatimentos no mesmo mês.
+6. Conferir que juros permanecem integrais e únicos por competência.
+7. Quitar o saldo restante.
+8. Menu Cartões -> cadastrar cartão.
+9. Criar uma compra parcelada.
+10. Registrar pagamento de uma parcela e conferir banco/PIX.
+
+OBSERVAÇÃO DE AUDITORIA
+-----------------------
+Os novos movimentos gravam tanto os IDs das contas quanto uma cópia (snapshot)
+do banco e da chave PIX usados naquele instante. Portanto, uma futura edição do
+cadastro da conta não altera a informação histórica já registrada.

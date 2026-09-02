@@ -1,114 +1,62 @@
-# Sistema de Controle de Empréstimos e Cartão de Crédito
+# Sistema de Controle de Empréstimos
 
-Um sistema web responsivo e moderno para gerenciamento de empréstimos pessoais, cálculo de juros mensais, abatimentos, controle de cartão de crédito, relatórios e geração automática de cobranças por WhatsApp.
+Aplicação web monolítica para controle de empréstimos pessoais e cartão de crédito.
 
-## 🎯 Funcionalidades
+## Stack atual
 
-✅ **Gestão de Clientes** - Cadastro completo com histórico
-✅ **Gestão de Empréstimos** - Independentes, com juros e abatimentos  
-✅ **Controle de Cartão** - Parcelas automáticas e rastreamento
-✅ **Dashboard** - Métricas e gráficos em tempo real
-✅ **Relatórios** - PDF e Excel com filtros avançados
-✅ **WhatsApp** - Mensagens automáticas de cobrança
+- Python 3.9+
+- Flask 3.1+
+- SQLite local
+- Jinja2 / HTML / CSS
+- Waitress para execução como serviço no Windows
+- openpyxl e ReportLab para relatórios
 
-## 🛠️ Stack
+O projeto **não usa Node.js, Docker, PostgreSQL, Next.js ou NestJS**.
 
-- **Frontend**: Next.js 14 + TypeScript + TailwindCSS + Shadcn UI
-- **Backend**: NestJS + TypeScript + Prisma + PostgreSQL
-- **DevOps**: Docker + Turborepo
+## Execução para desenvolvimento
 
-## 🚀 Quick Start
-
-```bash
-# 1. Instalar dependências
-npm install
-
-# 2. Iniciar banco de dados
-docker-compose up -d
-
-# 3. Configurar banco de dados
-cd apps/backend && npx prisma migrate dev --name init && cd ../..
-
-# 4. Iniciar desenvolvimento
-npm run dev
+```bat
+cd C:\temp\site\emprestimo
+python -m pip install -r requirements.txt
+python app.py
 ```
 
-Acesse:
-- Frontend: http://localhost:3000
-- Backend: http://localhost:3001
-- Database UI: http://localhost:8080
+Acesse `http://127.0.0.1:5000`.
 
-## 📖 Documentação
+## Produção no Windows
 
-- **[PROJECT_SPEC.md](./PROJECT_SPEC.md)** - Especificação completa
-- **[DESENVOLVIMENTO.md](./DESENVOLVIMENTO.md)** - Guia de desenvolvimento
-- **[Variáveis de Ambiente](./.env.example)** - Configurações
+Use `Gerenciar-Emprestimo.bat`. O gerenciador pode:
 
-## 📂 Estrutura
+1. instalar dependências necessárias;
+2. clonar este repositório;
+3. criar ambiente virtual;
+4. instalar `requirements.txt`;
+5. instalar o site como serviço Windows chamado **Emprestimo**;
+6. atualizar a instalação comparando o commit local com `origin/main`;
+7. desinstalar o serviço e os arquivos, com opção de preservar o banco.
 
-```
-apps/
-├── backend/          # NestJS API
-│   ├── src/modules/
-│   │   ├── auth/     # Autenticação JWT
-│   │   ├── clientes/ # Clientes CRUD
-│   │   ├── emprestimos/ # Empréstimos
-│   │   ├── cartao/   # Cartão de crédito
-│   │   └── dashboard/ # Dashboard
-│   └── prisma/       # Schema
-└── frontend/         # Next.js App
-    ├── src/app/      # Páginas
-    ├── src/components/ # Componentes
-    ├── src/services/ # API
-    └── src/types/    # Types
+Consulte [docs/DEPLOYMENT_WINDOWS.md](docs/DEPLOYMENT_WINDOWS.md).
+
+## Dados locais
+
+O SQLite fica em:
+
+```text
+data/emprestimos.db
 ```
 
-## 🔌 API Endpoints Principais
+Esse banco pode conter dados pessoais, financeiros, bancos e chaves PIX. **Ele não deve ser enviado ao GitHub.** O arquivo `.gitignore` bloqueia banco, WAL, SHM e `data/.secret_key`.
 
-```
-POST   /api/auth/login
-GET    /api/clientes
-POST   /api/clientes
-GET    /api/clientes/:id
-PUT    /api/clientes/:id
+## Documentação para desenvolvedores e IAs
 
-GET    /api/emprestimos
-POST   /api/emprestimos
-POST   /api/emprestimos/:id/abatimento
-POST   /api/emprestimos/:id/quitacao
+- [AGENTS.md](AGENTS.md) — contexto curto e regras obrigatórias para agentes de IA.
+- [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) — escopo funcional.
+- [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — regras financeiras que não podem ser quebradas.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura atual.
+- [docs/DEPLOYMENT_WINDOWS.md](docs/DEPLOYMENT_WINDOWS.md) — instalação, atualização e desinstalação.
+- [docs/GIT_BACKUP.md](docs/GIT_BACKUP.md) — publicação segura no GitHub.
+- [docs/ROADMAP.md](docs/ROADMAP.md) — próximos passos.
 
-GET    /api/dashboard/metricas
-```
+## Regra de manutenção
 
-## 🔐 Segurança
-
-- JWT Authentication
-- Validações de entrada com class-validator
-- CORS configurado
-- Proteção de rotas
-
-## 📊 Regras de Negócio
-
-✅ Empréstimos independentes por cliente
-✅ Taxa de juros mensal específica
-✅ Juros não reduzem o saldo devedor
-✅ Abatimentos afetam apenas o empréstimo selecionado
-✅ Parcelas de cartão geradas automaticamente
-✅ Histórico completo de movimentações
-
-## 📱 Responsividade
-
-Mobile-first design com suporte a desktop e dark mode automático.
-
-## 🤝 Próximos Passos
-
-- [ ] Implementar endpoints de autenticação
-- [ ] Criar interfaces do frontend
-- [ ] Integração WhatsApp
-- [ ] Exportação PDF/Excel
-- [ ] Testes automatizados
-- [ ] CI/CD com GitHub Actions
-
----
-
-**Status**: Estrutura base concluída ✨
+Mudanças de schema SQLite devem ser retrocompatíveis e preservar dados existentes. Nunca recrie o banco automaticamente para fazer uma atualização.

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Novo lançamento - {{ cartao['descricao'] }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Novo lançamento</h1><p class="muted">{{ cartao['cliente_nome'] }} · {{ cartao['descricao'] }}</p></div></div>
+<form method="post" class="card section-card"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid form-grid-2">
+<label class="field-span-2">Descrição da compra<input name="descricao" value="{{ form['descricao'] }}" maxlength="160" required placeholder="Ex.: Compra de eletrodoméstico"></label>
+<label>Valor total (R$)<input name="valor_total" value="{{ form['valor_total'] }}" inputmode="decimal" required placeholder="Ex.: 1.200,00"></label>
+<label>Quantidade de parcelas<input type="number" name="quantidade_parcelas" value="{{ form['quantidade_parcelas'] }}" min="1" max="120" required></label>
+<label>Data da compra<input type="date" name="data_compra" value="{{ form['data_compra'] }}" required></label>
+<label>Primeiro vencimento<input type="date" name="primeiro_vencimento" value="{{ form['primeiro_vencimento'] }}" required></label>
+</div><div class="info-box">As parcelas são geradas automaticamente. Se houver diferença de centavos no rateio, ela é distribuída nas primeiras parcelas sem alterar o total da compra.</div><div class="form-actions"><a class="button button-light" href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">Cancelar</a><button class="button" type="submit">Gerar parcelas</button></div></form>
+{% endblock %}

@@ -1,0 +1,370 @@
+:root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --text: #172033;
+    --muted: #687386;
+    --border: #dfe4ea;
+    --primary: #1d4ed8;
+    --primary-hover: #1e40af;
+    --danger: #b42318;
+    --danger-bg: #fef3f2;
+    --success: #087a37;
+    --success-bg: #ecfdf3;
+    --warning: #9a6700;
+    --warning-bg: #fff8c5;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.container {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+}
+
+.topbar {
+    background: #111827;
+    color: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.18);
+}
+
+.topbar-content {
+    min-height: 64px;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+}
+
+.brand {
+    color: #fff;
+    font-weight: 700;
+    font-size: 20px;
+}
+
+.brand:hover { text-decoration: none; }
+
+.nav { display: flex; gap: 18px; }
+.nav a { color: #dbe4f0; }
+
+.user-menu {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.user-menu form, .actions form { margin: 0; }
+
+.page { padding: 32px 0 60px; }
+
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 22px;
+}
+
+h1, h2 { margin-top: 0; }
+h1 { margin-bottom: 6px; }
+h2 { font-size: 20px; }
+
+.muted { color: var(--muted); margin-top: 0; }
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, .05);
+}
+
+.section-card { padding: 24px; margin-bottom: 20px; }
+.table-card { overflow: hidden; }
+
+.button {
+    appearance: none;
+    border: 1px solid var(--primary);
+    border-radius: 7px;
+    padding: 10px 16px;
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font: inherit;
+    font-weight: 600;
+}
+
+.button:hover { background: var(--primary-hover); text-decoration: none; }
+.button-secondary { background: #334155; border-color: #334155; }
+.button-light { background: #fff; color: #253047; border-color: #cbd5e1; }
+.button-light:hover { background: #f8fafc; }
+.button-danger { background: var(--danger); border-color: var(--danger); }
+.button-small { padding: 6px 10px; font-size: 14px; }
+
+.actions { display: flex; align-items: center; gap: 8px; }
+
+.auth-wrapper {
+    min-height: calc(100vh - 64px);
+    display: grid;
+    place-items: center;
+    padding: 24px 0;
+}
+
+.auth-card { width: min(460px, 100%); padding: 32px; }
+
+.form-grid { display: grid; gap: 18px; }
+.form-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field-span-2 { grid-column: span 2; }
+
+label {
+    display: grid;
+    gap: 7px;
+    font-weight: 600;
+    color: #344054;
+}
+
+input, select, textarea {
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    padding: 10px 12px;
+    background: #fff;
+    color: var(--text);
+    font: inherit;
+}
+
+input:focus, select:focus, textarea:focus {
+    outline: 2px solid rgba(29, 78, 216, .18);
+    border-color: var(--primary);
+}
+
+textarea { resize: vertical; }
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 8px;
+}
+
+.messages { margin-bottom: 20px; display: grid; gap: 8px; }
+.alert { padding: 12px 14px; border-radius: 8px; border: 1px solid transparent; }
+.alert-success { background: var(--success-bg); color: var(--success); border-color: #abefc6; }
+.alert-danger { background: var(--danger-bg); color: var(--danger); border-color: #fecdca; }
+.alert-warning { background: var(--warning-bg); color: var(--warning); border-color: #f5d90a; }
+
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.metric-card { padding: 20px; display: grid; gap: 10px; }
+.metric-card span { color: var(--muted); }
+.metric-card strong { font-size: 26px; }
+
+.filters {
+    display: grid;
+    grid-template-columns: 1fr 180px auto;
+    gap: 10px;
+}
+
+.table-responsive { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 13px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+th { background: #f8fafc; color: #475467; font-size: 13px; text-transform: uppercase; letter-spacing: .02em; }
+tbody tr:last-child td { border-bottom: 0; }
+.text-right { text-align: right; }
+
+.badge {
+    display: inline-flex;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+}
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-muted { background: #eef2f6; color: #475467; }
+
+.empty-state { padding: 28px; color: var(--muted); text-align: center; }
+
+.detail-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, .8fr) minmax(420px, 1.4fr);
+    gap: 20px;
+}
+
+.details {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    gap: 12px 16px;
+    margin-bottom: 0;
+}
+.details dt { color: var(--muted); font-weight: 700; }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+
+.section-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+@media (max-width: 900px) {
+    .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .detail-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
+    .container { width: min(100% - 20px, 1180px); }
+    .topbar-content { flex-wrap: wrap; padding: 12px 0; gap: 12px; }
+    .nav { order: 3; width: 100%; }
+    .user-menu span { display: none; }
+    .page-header { align-items: flex-start; flex-direction: column; }
+    .metrics-grid { grid-template-columns: 1fr; }
+    .filters { grid-template-columns: 1fr; }
+    .form-grid-2 { grid-template-columns: 1fr; }
+    .field-span-2 { grid-column: span 1; }
+    .details { grid-template-columns: 1fr; gap: 4px; }
+    .details dd { margin-bottom: 10px; }
+}
+
+/* Passo 4 - Empréstimos */
+.filters-loans { grid-template-columns: 1fr 180px auto; }
+.section-subtitle { margin-bottom: 0; }
+
+.loan-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.loan-detail-grid {
+    grid-template-columns: minmax(300px, .7fr) minmax(520px, 1.5fr);
+}
+
+.status-strong { font-size: 20px !important; }
+
+.badge-ativo { background: var(--success-bg); color: var(--success); }
+.badge-quitado { background: #eef2f6; color: #344054; }
+.badge-vencido { background: var(--danger-bg); color: var(--danger); }
+.badge-movimento { background: #eff4ff; color: #3538cd; }
+
+.info-box {
+    margin-top: 22px;
+    padding: 14px 16px;
+    border: 1px solid #b2ccff;
+    border-radius: 8px;
+    background: #eff8ff;
+    color: #1849a9;
+    line-height: 1.5;
+}
+
+.compact-info { margin-top: 24px; }
+.next-step-card { border-left: 4px solid var(--primary); }
+label small { color: var(--muted); font-weight: 400; line-height: 1.35; }
+
+@media (max-width: 900px) {
+    .loan-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .loan-detail-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 680px) {
+    .loan-summary-grid { grid-template-columns: 1fr; }
+    .filters-loans { grid-template-columns: 1fr; }
+}
+
+
+/* Passo 5 - Núcleo financeiro */
+.metrics-grid-7 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.dashboard-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+}
+.dashboard-columns .section-card { margin-bottom: 0; }
+.loan-secondary-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+.compact-metric { padding: 15px 18px; display: grid; gap: 7px; }
+.compact-metric span { color: var(--muted); font-size: 13px; }
+.compact-metric strong { font-size: 18px; }
+.wrap-actions { flex-wrap: wrap; }
+.financial-operation-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, .75fr) minmax(420px, 1.25fr);
+    gap: 20px;
+}
+.calculation-box {
+    margin-top: 22px;
+    border: 1px solid #bfdbfe;
+    background: #eff6ff;
+    border-radius: 10px;
+    padding: 18px;
+    display: grid;
+    gap: 8px;
+}
+.calculation-box span, .calculation-box small { color: #475467; }
+.calculation-box strong { font-size: 28px; }
+.danger-calculation { border-color: #fecdca; background: var(--danger-bg); }
+.field-help { color: var(--muted); font-weight: 400; }
+.filters-movements { grid-template-columns: minmax(220px, 1fr) 180px 180px auto; }
+.badge-emprestimo { background: #eef2ff; color: #3730a3; }
+.badge-juros { background: #fff7ed; color: #9a3412; }
+.badge-abatimento { background: #ecfdf3; color: #087a37; }
+.badge-quitacao { background: #eff6ff; color: #1d4ed8; }
+.badge-ativo { background: #ecfdf3; color: #087a37; }
+.badge-quitado { background: #eff6ff; color: #1d4ed8; }
+.badge-vencido { background: #fef3f2; color: #b42318; }
+.info-box {
+    margin-top: 20px;
+    padding: 14px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    color: #475467;
+    line-height: 1.45;
+}
+
+@media (max-width: 1000px) {
+    .metrics-grid-7 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dashboard-columns { grid-template-columns: 1fr; }
+    .loan-secondary-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .financial-operation-grid { grid-template-columns: 1fr; }
+    .filters-movements { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 680px) {
+    .metrics-grid-7, .loan-secondary-metrics, .filters-movements { grid-template-columns: 1fr; }
+}
+
+/* Passo 9.1/10 - contas bancárias e cartões */
+.filters-bank { grid-template-columns: minmax(260px, 1fr) 200px auto; }
+.form-section-title { margin: 26px 0 10px; }
+.compact-actions { gap: 6px; justify-content: flex-end; }
+.checkbox-label { display: flex; grid-template-columns: none; flex-direction: row; align-items: center; gap: 10px; }
+.checkbox-label input { width: auto; }
+.text-danger { color: var(--danger) !important; }
+.badge-pendente { background: #fff7ed; color: #9a3412; }
+.badge-pago { background: #ecfdf3; color: #087a37; }
+.badge-cancelado { background: #eef2f6; color: #475467; }
+
+@media (max-width: 680px) {
+    .filters-bank { grid-template-columns: 1fr; }
+}
