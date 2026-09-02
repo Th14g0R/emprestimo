@@ -1,10 +1,11 @@
 @echo off
 REM ============================================================================
-REM  ATUALIZADOR - Sistema de Controle de Empréstimos e Cartão de Crédito
+REM  ATUALIZADOR - Sistema de Controle de Emprestimos e Cartao de Credito
 REM  ============================================================================
-REM  Este script realiza a atualização do sistema
+REM  Este script realiza a atualizacao do sistema
 REM  ============================================================================
 
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 REM Cores para output

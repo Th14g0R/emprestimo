@@ -1,11 +1,12 @@
 @echo off
 REM ============================================================================
-REM  INSTALADOR - Sistema de Controle de Empréstimos e Cartão de Crédito
+REM  INSTALADOR - Sistema de Controle de Emprestimos e Cartao de Credito
 REM  ============================================================================
-REM  Este script realiza a instalação completa do sistema
-REM  Verifica dependências, instala o necessário e configura como serviço
+REM  Este script realiza a instalacao completa do sistema
+REM  Verifica dependencias, instala o necessario e configura como servico
 REM  ============================================================================
 
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 REM Cores para output

@@ -1,10 +1,11 @@
 @echo off
 REM ============================================================================
-REM  DESINSTALADOR - Sistema de Controle de Empréstimos e Cartão de Crédito
+REM  DESINSTALADOR - Sistema de Controle de Emprestimos e Cartao de Credito
 REM  ============================================================================
-REM  Este script realiza a desinstalação completa do sistema
+REM  Este script realiza a desinstalacao completa do sistema
 REM  ============================================================================
 
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 REM Cores para output

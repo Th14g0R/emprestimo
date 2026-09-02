@@ -1,10 +1,11 @@
 @echo off
 REM ============================================================================
-REM  GERENCIADOR - Sistema de Controle de Empréstimos e Cartão de Crédito
+REM  GERENCIADOR - Sistema de Controle de Emprestimos e Cartao de Credito
 REM  ============================================================================
-REM  Este script permite gerenciar o serviço (iniciar, parar, reiniciar)
+REM  Este script permite gerenciar o servico (iniciar, parar, reiniciar)
 REM  ============================================================================
 
+chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
 REM Cores para output
