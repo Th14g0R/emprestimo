@@ -1,36 +1,17 @@
 {% extends "base.html" %}
-{% block title %}{{ cliente['nome'] }}
+{% block title %}{{ cliente['nome'] }}{% endblock %}
 
-<section class="card section-card">
-    <div class="section-title-row">
-        <div><h2>Contas bancárias</h2><p class="muted section-subtitle">Usadas como origem/destino dos valores deste cliente.</p></div>
-        {% if cliente['ativo'] %}<a class="button button-small" href="{{ url_for('contas_nova', cliente_id=cliente['id']) }}">Nova conta</a>{% endif %}
-    </div>
-    {% if contas_bancarias %}
-    <div class="table-responsive"><table><thead><tr><th>Banco</th><th>Descrição</th><th>PIX</th><th>Ag./Conta</th><th>Status</th><th></th></tr></thead><tbody>
-    {% for conta in contas_bancarias %}<tr><td>{{ conta['banco'] }} {% if conta['principal'] %}<span class="badge badge-ativo">Padrão</span>{% endif %}</td><td>{{ conta['descricao'] or '-' }}</td><td>{{ conta['chave_pix'] or '-' }}</td><td>{{ conta['agencia'] or '-' }} / {{ conta['conta'] or '-' }}</td><td>{{ 'Ativa' if conta['ativo'] else 'Inativa' }}</td><td><a class="button button-small button-light" href="{{ url_for('contas_editar', conta_id=conta['id']) }}">Editar</a></td></tr>{% endfor %}
-    </tbody></table></div>
-    {% else %}<div class="empty-state">Nenhuma conta bancária cadastrada para este cliente.</div>{% endif %}
-</section>
-
-<section class="card section-card">
-    <div class="section-title-row">
-        <div><h2>Cartões de crédito</h2><p class="muted section-subtitle">Controle independente dos empréstimos.</p></div>
-        {% if cliente['ativo'] %}<a class="button button-small" href="{{ url_for('cartoes_novo', cliente_id=cliente['id']) }}">Novo cartão</a>{% endif %}
-    </div>
-    {% if cartoes %}
-    <div class="table-responsive"><table><thead><tr><th>Descrição</th><th>Status</th></tr></thead><tbody>{% for cartao in cartoes %}<tr><td><a href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">{{ cartao['descricao'] }}</a></td><td>{{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</td></tr>{% endfor %}</tbody></table></div>
-    {% else %}<div class="empty-state">Nenhum cartão cadastrado para este cliente.</div>{% endif %}
-</section>
-
-{% endblock %}
 {% block content %}
 <div class="page-header">
     <div>
         <h1>{{ cliente['nome'] }}</h1>
-        <p class="muted">Detalhes do cliente.</p>
+        <p class="muted">Detalhes e posição financeira do cliente.</p>
     </div>
     <div class="actions">
+        <a class="button button-secondary"
+           href="{{ url_for('relatorio_cliente', cliente_id=cliente['id']) }}">
+            Extrato
+        </a>
         {% if cliente['ativo'] %}
             <a class="button" href="{{ url_for('emprestimos_novo', cliente_id=cliente['id']) }}">Novo empréstimo</a>
             <a class="button button-secondary" href="{{ url_for('contas_nova', cliente_id=cliente['id']) }}">Nova conta</a>
@@ -44,6 +25,25 @@
             </button>
         </form>
     </div>
+</div>
+
+<div class="metrics-grid client-position-metrics">
+    <section class="card metric-card">
+        <span>Total histórico emprestado</span>
+        <strong>{{ resumo_financeiro['total_historico_emprestado_centavos']|money }}</strong>
+    </section>
+    <section class="card metric-card">
+        <span>Principal em aberto</span>
+        <strong>{{ resumo_financeiro['principal_em_aberto_centavos']|money }}</strong>
+    </section>
+    <section class="card metric-card">
+        <span>Juros em aberto</span>
+        <strong>{{ resumo_financeiro['juros_em_aberto_centavos']|money }}</strong>
+    </section>
+    <section class="card metric-card">
+        <span>Total a receber</span>
+        <strong>{{ resumo_financeiro['total_a_receber_centavos']|money }}</strong>
+    </section>
 </div>
 
 <div class="detail-grid">
@@ -65,7 +65,7 @@
         <div class="section-title-row">
             <div>
                 <h2>Empréstimos</h2>
-                <p class="muted section-subtitle">Contratos vinculados exclusivamente a este cliente.</p>
+                <p class="muted section-subtitle">Contratos vinculados a este cliente.</p>
             </div>
             {% if cliente['ativo'] %}
                 <a class="button button-small" href="{{ url_for('emprestimos_novo', cliente_id=cliente['id']) }}">Novo</a>
@@ -73,59 +73,99 @@
         </div>
 
         {% if emprestimos %}
-            <div class="table-responsive">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Data</th>
-                            <th>Descrição</th>
-                            <th class="text-right">Original</th>
-                            <th class="text-right">Saldo</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    {% for emprestimo in emprestimos %}
-                        <tr>
-                            <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">{{ emprestimo['id'] }}</a></td>
-                            <td>{{ emprestimo['data_emprestimo']|date_br }}</td>
-                            <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">{{ emprestimo['descricao'] or 'Empréstimo #' ~ emprestimo['id'] }}</a></td>
-                            <td class="text-right">{{ emprestimo['valor_original_centavos']|money }}</td>
-                            <td class="text-right">{{ emprestimo['saldo_atual_centavos']|money }}</td>
-                            <td><span class="badge badge-{{ emprestimo['status']|lower }}">{{ emprestimo['status'] }}</span></td>
-                        </tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Data</th>
+                        <th>Descrição</th>
+                        <th class="text-right">Original</th>
+                        <th class="text-right">Saldo</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for emprestimo in emprestimos %}
+                    <tr>
+                        <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">#{{ emprestimo['id'] }}</a></td>
+                        <td>{{ emprestimo['data_emprestimo']|date_br }}</td>
+                        <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=emprestimo['id']) }}">{{ emprestimo['descricao'] or 'Empréstimo #' ~ emprestimo['id'] }}</a></td>
+                        <td class="text-right">{{ emprestimo['valor_original_centavos']|money }}</td>
+                        <td class="text-right"><strong>{{ emprestimo['saldo_atual_centavos']|money }}</strong></td>
+                        <td><span class="badge badge-{{ emprestimo['status']|lower }}">{{ emprestimo['status'] }}</span></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
         {% else %}
             <div class="empty-state">Este cliente ainda não possui empréstimos.</div>
         {% endif %}
     </section>
 </div>
 
-
 <section class="card section-card">
     <div class="section-title-row">
-        <div><h2>Contas bancárias</h2><p class="muted section-subtitle">Usadas como origem/destino dos valores deste cliente.</p></div>
-        {% if cliente['ativo'] %}<a class="button button-small" href="{{ url_for('contas_nova', cliente_id=cliente['id']) }}">Nova conta</a>{% endif %}
+        <div>
+            <h2>Contas bancárias</h2>
+            <p class="muted section-subtitle">Usadas como origem/destino dos valores deste cliente.</p>
+        </div>
+        {% if cliente['ativo'] %}
+            <a class="button button-small" href="{{ url_for('contas_nova', cliente_id=cliente['id']) }}">Nova conta</a>
+        {% endif %}
     </div>
+
     {% if contas_bancarias %}
-    <div class="table-responsive"><table><thead><tr><th>Banco</th><th>Descrição</th><th>PIX</th><th>Ag./Conta</th><th>Status</th><th></th></tr></thead><tbody>
-    {% for conta in contas_bancarias %}<tr><td>{{ conta['banco'] }} {% if conta['principal'] %}<span class="badge badge-ativo">Padrão</span>{% endif %}</td><td>{{ conta['descricao'] or '-' }}</td><td>{{ conta['chave_pix'] or '-' }}</td><td>{{ conta['agencia'] or '-' }} / {{ conta['conta'] or '-' }}</td><td>{{ 'Ativa' if conta['ativo'] else 'Inativa' }}</td><td><a class="button button-small button-light" href="{{ url_for('contas_editar', conta_id=conta['id']) }}">Editar</a></td></tr>{% endfor %}
-    </tbody></table></div>
-    {% else %}<div class="empty-state">Nenhuma conta bancária cadastrada para este cliente.</div>{% endif %}
+    <div class="table-responsive">
+        <table>
+            <thead><tr><th>Banco</th><th>Descrição</th><th>PIX</th><th>Ag./Conta</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            {% for conta in contas_bancarias %}
+                <tr>
+                    <td>{{ conta['banco'] }} {% if conta['principal'] %}<span class="badge badge-ativo">Padrão</span>{% endif %}</td>
+                    <td>{{ conta['descricao'] or '-' }}</td>
+                    <td>{{ conta['chave_pix'] or '-' }}</td>
+                    <td>{{ conta['agencia'] or '-' }} / {{ conta['conta'] or '-' }}</td>
+                    <td>{{ 'Ativa' if conta['ativo'] else 'Inativa' }}</td>
+                    <td><a class="button button-small button-light" href="{{ url_for('contas_editar', conta_id=conta['id']) }}">Editar</a></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhuma conta bancária cadastrada para este cliente.</div>
+    {% endif %}
 </section>
 
 <section class="card section-card">
     <div class="section-title-row">
-        <div><h2>Cartões de crédito</h2><p class="muted section-subtitle">Controle independente dos empréstimos.</p></div>
-        {% if cliente['ativo'] %}<a class="button button-small" href="{{ url_for('cartoes_novo', cliente_id=cliente['id']) }}">Novo cartão</a>{% endif %}
+        <div>
+            <h2>Cartões de crédito</h2>
+            <p class="muted section-subtitle">Controle independente dos empréstimos.</p>
+        </div>
+        {% if cliente['ativo'] %}
+            <a class="button button-small" href="{{ url_for('cartoes_novo', cliente_id=cliente['id']) }}">Novo cartão</a>
+        {% endif %}
     </div>
-    {% if cartoes %}
-    <div class="table-responsive"><table><thead><tr><th>Descrição</th><th>Status</th></tr></thead><tbody>{% for cartao in cartoes %}<tr><td><a href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">{{ cartao['descricao'] }}</a></td><td>{{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</td></tr>{% endfor %}</tbody></table></div>
-    {% else %}<div class="empty-state">Nenhum cartão cadastrado para este cliente.</div>{% endif %}
-</section>
 
+    {% if cartoes %}
+    <div class="table-responsive">
+        <table>
+            <thead><tr><th>Descrição</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for cartao in cartoes %}
+                <tr>
+                    <td><a href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">{{ cartao['descricao'] }}</a></td>
+                    <td>{{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhum cartão cadastrado para este cliente.</div>
+    {% endif %}
+</section>
 {% endblock %}

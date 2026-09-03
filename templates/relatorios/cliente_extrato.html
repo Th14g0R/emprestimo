@@ -1,0 +1,402 @@
+{% extends "base.html" %}
+{% block title %}Extrato por cliente{% endblock %}
+
+{% block content %}
+<div class="page-header statement-page-header">
+    <div>
+        <h1>Extrato por cliente</h1>
+        <p class="muted">Posição financeira, conferência mensal e movimentação detalhada.</p>
+    </div>
+    {% if cliente %}
+    <div class="actions no-print">
+        <a class="button button-light" href="{{ url_for('clientes_detalhe', cliente_id=cliente['id']) }}">Abrir cliente</a>
+        <button class="button button-secondary" type="button" onclick="window.print()">Imprimir / PDF</button>
+    </div>
+    {% endif %}
+</div>
+
+<section class="card section-card report-filter-card no-print">
+    <form method="get" class="client-statement-filter" id="client-statement-filter">
+        <label>
+            Cliente
+            <select name="cliente_id" id="statement-client" required>
+                <option value="">Selecione um cliente...</option>
+                {% for item in clientes %}
+                    <option value="{{ item['id'] }}"
+                        {{ 'selected' if cliente and cliente['id'] == item['id'] }}>
+                        {{ item['nome'] }}{% if not item['ativo'] %} — inativo{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Data inicial
+            <input type="date" name="data_inicio" value="{{ data_inicio }}">
+        </label>
+
+        <label>
+            Data final
+            <input type="date" name="data_fim" value="{{ data_fim }}">
+        </label>
+
+        <div class="statement-filter-actions">
+            <button class="button button-secondary" type="submit">Gerar extrato</button>
+            {% if cliente %}
+            <a class="button button-light" href="{{ url_for('relatorio_cliente', cliente_id=cliente['id']) }}">Período completo</a>
+            {% endif %}
+        </div>
+    </form>
+</section>
+
+{% if not cliente %}
+<section class="card section-card">
+    <div class="empty-state">
+        Selecione um cliente para visualizar empréstimos, valores a receber,
+        competências sem pagamento e o extrato detalhado.
+    </div>
+</section>
+{% else %}
+
+<div class="statement-identification print-only">
+    <strong>{{ cliente['nome'] }}</strong>
+    <span>Período: {{ data_inicio|date_br }} a {{ data_fim|date_br }}</span>
+</div>
+
+<div class="metrics-grid statement-metrics">
+    <section class="card metric-card">
+        <span>Total histórico emprestado</span>
+        <strong>{{ resumo['total_historico_emprestado_centavos']|money }}</strong>
+        <small>Todos os contratos já concedidos ao cliente.</small>
+    </section>
+
+    <section class="card metric-card">
+        <span>Principal em aberto</span>
+        <strong>{{ resumo['principal_em_aberto_centavos']|money }}</strong>
+        <small>Capital que ainda permanece emprestado.</small>
+    </section>
+
+    <section class="card metric-card">
+        <span>Juros/documentos em aberto</span>
+        <strong>{{ resumo['juros_em_aberto_centavos']|money }}</strong>
+        <small>Títulos PREVISTO/VENCIDO ainda pendentes.</small>
+    </section>
+
+    <section class="card metric-card">
+        <span>Total a receber</span>
+        <strong>{{ resumo['total_a_receber_centavos']|money }}</strong>
+        <small>Principal em aberto + juros/documentos em aberto.</small>
+    </section>
+</div>
+
+<section class="card section-card statement-section">
+    <div class="section-title-row">
+        <div>
+            <h2>Empréstimos do cliente</h2>
+            <p class="muted section-subtitle">
+                Posição atual de cada contrato.
+            </p>
+        </div>
+    </div>
+
+    {% if emprestimos %}
+    <div class="table-responsive">
+        <table class="statement-loans-table">
+            <thead>
+                <tr>
+                    <th>Contrato</th>
+                    <th>Data</th>
+                    <th>Taxa</th>
+                    <th class="text-right">Original</th>
+                    <th class="text-right">Principal em aberto</th>
+                    <th class="text-right">Juros em aberto</th>
+                    <th class="text-right">Total a receber</th>
+                    <th class="text-right">Juros já recebidos</th>
+                    <th>Último recebimento</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for e in emprestimos %}
+                <tr>
+                    <td>
+                        <a href="{{ url_for('emprestimos_detalhe', emprestimo_id=e['id']) }}">
+                            #{{ e['id'] }}
+                        </a>
+                        {% if e['descricao'] %}
+                            <br><small>{{ e['descricao'] }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ e['data_emprestimo']|date_br }}</td>
+                    <td>{{ e['taxa_juros_mensal']|percent_br }}</td>
+                    <td class="text-right">{{ e['valor_original_centavos']|money }}</td>
+                    <td class="text-right"><strong>{{ e['saldo_atual_centavos']|money }}</strong></td>
+                    <td class="text-right">{{ e['juros_em_aberto_centavos']|money }}</td>
+                    <td class="text-right">
+                        <strong>{{ (e['saldo_atual_centavos'] + e['juros_em_aberto_centavos'])|money }}</strong>
+                    </td>
+                    <td class="text-right">{{ e['juros_recebidos_centavos']|money }}</td>
+                    <td>{{ e['ultimo_recebimento']|date_br if e['ultimo_recebimento'] else '-' }}</td>
+                    <td><span class="badge badge-{{ e['status']|lower }}">{{ e['status'] }}</span></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">O cliente não possui empréstimos.</div>
+    {% endif %}
+</section>
+
+<section class="card section-card statement-section">
+    <div class="section-title-row">
+        <div>
+            <h2>Conferência mensal</h2>
+            <p class="muted section-subtitle">
+                A coluna <strong>Competência</strong> verifica o que deveria ter sido
+                pago naquele mês. A coluna <strong>Caixa</strong> mostra se houve
+                recebimento efetivo naquele mês calendário.
+            </p>
+        </div>
+    </div>
+
+    {% if conferencia_mensal %}
+    <div class="table-responsive">
+        <table class="monthly-check-table">
+            <thead>
+                <tr>
+                    <th>Competência</th>
+                    <th class="text-right">Juros esperados</th>
+                    <th class="text-right">Pago da competência</th>
+                    <th class="text-right">Falta da competência</th>
+                    <th>Datas em que foi pago</th>
+                    <th>Situação competência</th>
+                    <th class="text-right">Juros recebidos no mês</th>
+                    <th class="text-right">Total recebido no mês</th>
+                    <th>Situação caixa</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in conferencia_mensal %}
+                <tr class="{{ 'statement-problem-row' if row['situacao_competencia'] in ['SEM PAGAMENTO', 'PARCIAL'] or row['situacao_caixa'] == 'SEM RECEBIMENTO' }}">
+                    <td><strong>{{ row['competencia']|competencia_br }}</strong></td>
+                    <td class="text-right">{{ row['esperado_centavos']|money }}</td>
+                    <td class="text-right">{{ row['recebido_competencia_centavos']|money }}</td>
+                    <td class="text-right"><strong>{{ row['pendente_centavos']|money }}</strong></td>
+                    <td>
+                        {% if row['datas_pagamento'] %}
+                            {% for data in row['datas_pagamento'] %}
+                                <span class="statement-date-chip">{{ data|date_br }}</span>
+                            {% endfor %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="statement-status statement-status-{{ row['situacao_competencia']|lower|replace(' ', '-') }}">
+                            {{ row['situacao_competencia'] }}
+                        </span>
+                    </td>
+                    <td class="text-right">{{ row['juros_recebidos_mes_centavos']|money }}</td>
+                    <td class="text-right">{{ row['total_recebido_mes_centavos']|money }}</td>
+                    <td>
+                        <span class="statement-status statement-status-{{ row['situacao_caixa']|lower|replace(' ', '-') }}">
+                            {{ row['situacao_caixa'] }}
+                        </span>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+
+<section class="card section-card statement-section">
+    <div class="section-title-row">
+        <div>
+            <h2>Pendências por competência e contrato</h2>
+            <p class="muted section-subtitle">
+                Mostra exatamente qual empréstimo ficou sem pagamento ou teve
+                recebimento parcial.
+            </p>
+        </div>
+    </div>
+
+    {% if pendencias_competencia %}
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Competência</th>
+                    <th>Contrato</th>
+                    <th>Vencimento</th>
+                    <th class="text-right">Saldo-base</th>
+                    <th>Taxa</th>
+                    <th class="text-right">Juro esperado</th>
+                    <th class="text-right">Recebido</th>
+                    <th class="text-right">Falta</th>
+                    <th>Datas pagas</th>
+                    <th>Situação</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in pendencias_competencia %}
+                <tr>
+                    <td>{{ item['competencia']|competencia_br }}</td>
+                    <td>
+                        <a href="{{ url_for('emprestimos_detalhe', emprestimo_id=item['emprestimo_id']) }}">
+                            #{{ item['emprestimo_id'] }}
+                        </a>
+                        {% if item['descricao'] %}
+                            <br><small>{{ item['descricao'] }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ item['vencimento']|date_br }}</td>
+                    <td class="text-right">{{ item['saldo_base_centavos']|money }}</td>
+                    <td>{{ item['taxa_juros_mensal']|percent_br }}</td>
+                    <td class="text-right">{{ item['esperado_centavos']|money }}</td>
+                    <td class="text-right">{{ item['recebido_centavos']|money }}</td>
+                    <td class="text-right"><strong>{{ item['pendente_centavos']|money }}</strong></td>
+                    <td>
+                        {% if item['datas_pagamento'] %}
+                            {% for data in item['datas_pagamento'] %}
+                                <span class="statement-date-chip">{{ data|date_br }}</span>
+                            {% endfor %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="statement-status statement-status-{{ item['situacao']|lower|replace(' ', '-') }}">
+                            {{ item['situacao'] }}
+                        </span>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            Nenhuma competência pendente foi encontrada no período.
+        </div>
+    {% endif %}
+</section>
+
+<section class="card section-card statement-section client-bank-statement">
+    <div class="section-title-row">
+        <div>
+            <h2>Extrato de movimentações</h2>
+            <p class="muted section-subtitle">
+                Lançamentos em ordem cronológica, como um extrato bancário.
+            </p>
+        </div>
+    </div>
+
+    {% if resumo_periodo %}
+    <div class="statement-period-summary">
+        <div><span>Saldo principal na abertura</span><strong>{{ resumo_periodo['saldo_abertura_centavos']|money }}</strong></div>
+        <div><span>Entradas recebidas</span><strong>{{ resumo_periodo['total_entradas_centavos']|money }}</strong></div>
+        <div><span>Novos valores emprestados</span><strong>{{ resumo_periodo['total_saidas_centavos']|money }}</strong></div>
+        <div><span>Juros recebidos</span><strong>{{ resumo_periodo['juros_recebidos_centavos']|money }}</strong></div>
+        <div><span>Principal recebido</span><strong>{{ resumo_periodo['principal_recebido_centavos']|money }}</strong></div>
+        <div><span>Saldo principal ao final</span><strong>{{ resumo_periodo['saldo_principal_final_centavos']|money }}</strong></div>
+    </div>
+    {% endif %}
+
+    {% if extrato %}
+    <div class="table-responsive">
+        <table class="bank-statement-table">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Contrato</th>
+                    <th>Histórico</th>
+                    <th>Competência</th>
+                    <th>Mês pagamento</th>
+                    <th class="text-right">Entrada</th>
+                    <th class="text-right">Saída</th>
+                    <th class="text-right">Principal após</th>
+                    <th>Banco / origem-destino</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for mov in extrato %}
+                <tr>
+                    <td>{{ mov['data_movimento']|date_br }}</td>
+                    <td>
+                        <a href="{{ url_for('emprestimos_detalhe', emprestimo_id=mov['emprestimo_id']) }}">
+                            #{{ mov['emprestimo_id'] }}
+                        </a>
+                    </td>
+                    <td>
+                        <strong>{{ mov['tipo'] }}</strong>
+                        {% if mov['observacao'] %}
+                            <br><small>{{ mov['observacao'] }}</small>
+                        {% endif %}
+                        {% if mov['pagamento_integrado_id'] %}
+                            <br>
+                            <a class="integrated-payment-link"
+                               href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">
+                                Pagamento integrado #{{ mov['pagamento_integrado_id'] }}
+                            </a>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ mov['competencia']|competencia_br if mov['competencia'] else '-' }}
+                        {% if mov['competencia_divergente'] %}
+                            <br><span class="statement-mismatch">Pago em outro mês</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ mov['mes_pagamento']|competencia_br }}</td>
+                    <td class="text-right statement-credit">
+                        {{ mov['entrada_centavos']|money if mov['entrada_centavos'] else '-' }}
+                    </td>
+                    <td class="text-right statement-debit">
+                        {{ mov['saida_centavos']|money if mov['saida_centavos'] else '-' }}
+                    </td>
+                    <td class="text-right"><strong>{{ mov['saldo_principal_cliente_centavos']|money }}</strong></td>
+                    <td class="statement-flow">
+                        {% if mov['origem_banco'] %}
+                            <span>{{ mov['origem_banco'] }}</span>
+                        {% endif %}
+                        {% if mov['origem_pix'] %}
+                            <small>PIX {{ mov['origem_pix'] }}</small>
+                        {% endif %}
+                        {% if mov['origem_banco'] or mov['destino_banco'] %}
+                            <span class="flow-arrow">→</span>
+                        {% endif %}
+                        {% if mov['destino_banco'] %}
+                            <span>{{ mov['destino_banco'] }}</span>
+                        {% endif %}
+                        {% if mov['destino_pix'] %}
+                            <small>PIX {{ mov['destino_pix'] }}</small>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhuma movimentação encontrada no período.</div>
+    {% endif %}
+</section>
+
+<script class="no-print">
+(() => {
+    const select = document.getElementById('statement-client');
+    const form = document.getElementById('client-statement-filter');
+
+    if (!select || !form) return;
+
+    select.addEventListener('change', () => {
+        if (select.value) {
+            form.submit();
+        }
+    });
+})();
+</script>
+{% endif %}
+{% endblock %}

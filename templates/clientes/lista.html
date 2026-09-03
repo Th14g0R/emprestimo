@@ -51,7 +51,10 @@
                         </span>
                     </td>
                     <td class="text-right">
-                        <a class="button button-light button-small" href="{{ url_for('clientes_detalhe', cliente_id=cliente['id']) }}">Abrir</a>
+                        <div class="actions wrap-actions">
+                            <a class="button button-light button-small" href="{{ url_for('clientes_detalhe', cliente_id=cliente['id']) }}">Abrir</a>
+                            <a class="button button-secondary button-small" href="{{ url_for('relatorio_cliente', cliente_id=cliente['id']) }}">Extrato</a>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}

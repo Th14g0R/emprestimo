@@ -26,7 +26,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "17.0-integrated-partial-runtime-fix"
+APP_VERSION = "18.0-client-statement-report"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2140,6 +2140,119 @@ def register_routes(app: Flask) -> None:
             proximos_titulos=proximos_titulos,
         )
 
+    # -------------------- Relatório / Extrato por cliente --------------------
+
+    @app.get("/relatorios/clientes")
+    @login_required
+    def relatorio_cliente():
+        db = get_db()
+
+        clientes = db.execute(
+            """
+            SELECT id, nome, ativo
+              FROM clientes
+             ORDER BY ativo DESC, nome COLLATE NOCASE
+            """
+        ).fetchall()
+
+        cliente_id = parse_int(request.args.get("cliente_id"))
+        cliente = None
+        resumo = None
+        emprestimos = []
+        conferencia_mensal = []
+        pendencias_competencia = []
+        extrato = []
+        resumo_periodo = None
+
+        data_inicio_text = request.args.get("data_inicio", "").strip()
+        data_fim_text = request.args.get("data_fim", "").strip()
+
+        if cliente_id is not None:
+            cliente = db.execute(
+                "SELECT * FROM clientes WHERE id = ?",
+                (cliente_id,),
+            ).fetchone()
+
+            if cliente is None:
+                abort(404)
+
+            sync_receivable_titles(db)
+
+            limites = db.execute(
+                """
+                SELECT MIN(data_emprestimo) AS primeira_data
+                  FROM emprestimos
+                 WHERE cliente_id = ?
+                """,
+                (cliente_id,),
+            ).fetchone()
+
+            default_inicio = (
+                date.fromisoformat(limites["primeira_data"])
+                if limites and limites["primeira_data"]
+                else date.today()
+            )
+            default_fim = date.today()
+
+            data_inicio = (
+                parse_iso_date(data_inicio_text)
+                if data_inicio_text
+                else default_inicio
+            )
+            data_fim = (
+                parse_iso_date(data_fim_text)
+                if data_fim_text
+                else default_fim
+            )
+
+            if data_inicio is None:
+                flash("Data inicial inválida.", "warning")
+                data_inicio = default_inicio
+
+            if data_fim is None:
+                flash("Data final inválida.", "warning")
+                data_fim = default_fim
+
+            if data_inicio > data_fim:
+                flash(
+                    "A data inicial não pode ser posterior à data final.",
+                    "warning",
+                )
+                data_inicio, data_fim = default_inicio, default_fim
+
+            data_inicio_text = data_inicio.isoformat()
+            data_fim_text = data_fim.isoformat()
+
+            resumo = resumo_financeiro_cliente(db, cliente_id)
+            emprestimos = posicao_emprestimos_cliente(db, cliente_id)
+            conferencia_mensal, pendencias_competencia = conferencia_mensal_cliente(
+                db,
+                cliente_id,
+                data_inicio,
+                data_fim,
+            )
+            extrato, resumo_periodo = extrato_movimentacoes_cliente(
+                db,
+                cliente_id,
+                data_inicio,
+                data_fim,
+            )
+
+        return render_template(
+            "relatorios/cliente_extrato.html",
+            clientes=clientes,
+            cliente=cliente,
+            resumo=resumo,
+            emprestimos=emprestimos,
+            conferencia_mensal=conferencia_mensal,
+            pendencias_competencia=pendencias_competencia,
+            extrato=extrato,
+            resumo_periodo=resumo_periodo,
+            data_inicio=data_inicio_text,
+            data_fim=data_fim_text,
+        )
+
+
     # -------------------- Clientes --------------------
 
     @app.get("/clientes")
@@ -2234,6 +2347,7 @@ def register_routes(app: Flask) -> None:
             """,
             (cliente_id,),
         ).fetchall()
+        resumo_financeiro = resumo_financeiro_cliente(db, cliente_id)
         contas_bancarias = get_client_accounts(cliente_id, only_active=False)
         cartoes = db.execute(
             "SELECT id, descricao, ativo FROM cartoes_credito WHERE cliente_id = ? ORDER BY ativo DESC, id DESC",
@@ -2246,6 +2360,7 @@ def register_routes(app: Flask) -> None:
             emprestimos=emprestimos,
             contas_bancarias=contas_bancarias,
             cartoes=cartoes,
+            resumo_financeiro=resumo_financeiro,
         )
 
     @app.route("/clientes/<int:cliente_id>/editar", methods=["GET", "POST"])
@@ -5644,6 +5759,515 @@ def validate_emprestimo(form: dict[str, Any]) -> list[str]:
         errors.append("O primeiro vencimento não pode ser anterior à data do empréstimo.")
 
     return errors
+
+
+def iter_months(start_date: date, end_date: date) -> list[str]:
+    """Retorna competências YYYY-MM inclusivas entre duas datas."""
+    if start_date > end_date:
+        return []
+
+    current = first_day_of_month(start_date)
+    last = first_day_of_month(end_date)
+    result: list[str] = []
+
+    while current <= last:
+        result.append(current.strftime("%Y-%m"))
+        current = add_months_iso(current, 1)
+
+    return result
+
+
+def primeiro_vencimento_emprestimo(emprestimo: sqlite3.Row) -> date:
+    """Resolve o primeiro vencimento do contrato com a mesma regra da agenda."""
+    data_emprestimo = date.fromisoformat(emprestimo["data_emprestimo"])
+
+    if emprestimo["data_primeiro_vencimento"]:
+        return date.fromisoformat(emprestimo["data_primeiro_vencimento"])
+
+    base_due = add_months_iso(data_emprestimo, 1)
+    due_day = int(emprestimo["dia_vencimento"] or base_due.day)
+
+    return base_due.replace(
+        day=min(due_day, monthrange(base_due.year, base_due.month)[1])
+    )
+
+
+def resumo_financeiro_cliente(
+    db: sqlite3.Connection,
+    cliente_id: int,
+) -> dict[str, int]:
+    """
+    Posição atual do cliente.
+
+    - total_historico_emprestado: soma dos contratos já concedidos;
+    - principal_em_aberto: capital ainda emprestado hoje;
+    - juros_em_aberto: documentos PREVISTO/VENCIDO ainda pendentes;
+    - total_a_receber: principal + juros em aberto.
+    """
+    emprestimos = db.execute(
+        """
+        SELECT
+            COUNT(*) AS quantidade_emprestimos,
+            COALESCE(SUM(valor_original_centavos), 0) AS total_historico_emprestado_centavos,
+            COALESCE(SUM(
+                CASE
+                    WHEN status <> 'QUITADO'
+                    THEN saldo_atual_centavos
+                    ELSE 0
+                END
+            ), 0) AS principal_em_aberto_centavos
+          FROM emprestimos
+         WHERE cliente_id = ?
+        """,
+        (cliente_id,),
+    ).fetchone()
+
+    juros = db.execute(
+        """
+        SELECT COALESCE(SUM(t.valor_previsto_centavos), 0) AS juros_em_aberto_centavos
+          FROM titulos_receber t
+          JOIN emprestimos e ON e.id = t.emprestimo_id
+         WHERE e.cliente_id = ?
+           AND t.status IN ('PREVISTO', 'VENCIDO')
+        """,
+        (cliente_id,),
+    ).fetchone()
+
+    total_historico = int(emprestimos["total_historico_emprestado_centavos"] or 0)
+    principal = int(emprestimos["principal_em_aberto_centavos"] or 0)
+    juros_abertos = int(juros["juros_em_aberto_centavos"] or 0)
+
+    return {
+        "quantidade_emprestimos": int(emprestimos["quantidade_emprestimos"] or 0),
+        "total_historico_emprestado_centavos": total_historico,
+        "principal_em_aberto_centavos": principal,
+        "juros_em_aberto_centavos": juros_abertos,
+        "total_a_receber_centavos": principal + juros_abertos,
+    }
+
+
+def posicao_emprestimos_cliente(
+    db: sqlite3.Connection,
+    cliente_id: int,
+) -> list[sqlite3.Row]:
+    return db.execute(
+        """
+        SELECT e.id, e.descricao, e.data_emprestimo,
+               e.valor_original_centavos, e.saldo_atual_centavos,
+               e.taxa_juros_mensal, e.data_primeiro_vencimento,
+               e.dia_vencimento, e.status,
+               COALESCE((
+                    SELECT SUM(t.valor_previsto_centavos)
+                      FROM titulos_receber t
+                     WHERE t.emprestimo_id = e.id
+                       AND t.status IN ('PREVISTO', 'VENCIDO')
+               ), 0) AS juros_em_aberto_centavos,
+               COALESCE((
+                    SELECT SUM(m.valor_centavos)
+                      FROM movimentacoes_emprestimo m
+                     WHERE m.emprestimo_id = e.id
+                       AND m.tipo = 'JUROS'
+               ), 0) AS juros_recebidos_centavos,
+               (
+                    SELECT MAX(m.data_movimento)
+                      FROM movimentacoes_emprestimo m
+                     WHERE m.emprestimo_id = e.id
+                       AND m.tipo IN ('JUROS', 'ABATIMENTO', 'QUITACAO')
+               ) AS ultimo_recebimento
+          FROM emprestimos e
+         WHERE e.cliente_id = ?
+         ORDER BY
+               CASE WHEN e.status = 'QUITADO' THEN 1 ELSE 0 END,
+               e.data_emprestimo,
+               e.id
+        """,
+        (cliente_id,),
+    ).fetchall()
+
+
+def conferencia_mensal_cliente(
+    db: sqlite3.Connection,
+    cliente_id: int,
+    start_date: date,
+    end_date: date,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Compara, mês a mês:
+    1) o juro esperado pela COMPETÊNCIA;
+    2) o que realmente foi recebido daquela competência;
+    3) o que entrou no caixa no mês calendário.
+
+    Também retorna as pendências detalhadas por contrato/competência.
+    """
+    competencias = iter_months(start_date, end_date)
+
+    emprestimos = db.execute(
+        """
+        SELECT id, cliente_id, descricao, data_emprestimo,
+               valor_original_centavos, saldo_atual_centavos,
+               taxa_juros_mensal, data_primeiro_vencimento,
+               dia_vencimento, status
+          FROM emprestimos
+         WHERE cliente_id = ?
+         ORDER BY data_emprestimo, id
+        """,
+        (cliente_id,),
+    ).fetchall()
+
+    juros_rows = db.execute(
+        """
+        SELECT m.emprestimo_id, m.competencia,
+               COALESCE(SUM(m.valor_centavos), 0) AS recebido_centavos,
+               GROUP_CONCAT(DISTINCT m.data_movimento) AS datas_pagamento
+          FROM movimentacoes_emprestimo m
+          JOIN emprestimos e ON e.id = m.emprestimo_id
+         WHERE e.cliente_id = ?
+           AND m.tipo = 'JUROS'
+           AND m.competencia IS NOT NULL
+           AND m.competencia BETWEEN ? AND ?
+         GROUP BY m.emprestimo_id, m.competencia
+        """,
+        (
+            cliente_id,
+            start_date.strftime("%Y-%m"),
+            end_date.strftime("%Y-%m"),
+        ),
+    ).fetchall()
+
+    juros_por_contrato_comp = {
+        (int(row["emprestimo_id"]), row["competencia"]): {
+            "recebido_centavos": int(row["recebido_centavos"] or 0),
+            "datas_pagamento": row["datas_pagamento"] or "",
+        }
+        for row in juros_rows
+    }
+
+    caixa_rows = db.execute(
+        """
+        SELECT substr(m.data_movimento, 1, 7) AS mes_pagamento,
+               COALESCE(SUM(
+                    CASE WHEN m.tipo = 'JUROS'
+                         THEN m.valor_centavos ELSE 0 END
+               ), 0) AS juros_recebidos_centavos,
+               COALESCE(SUM(
+                    CASE WHEN m.tipo IN ('JUROS', 'ABATIMENTO', 'QUITACAO')
+                         THEN m.valor_centavos ELSE 0 END
+               ), 0) AS total_recebido_centavos,
+               COUNT(
+                    CASE WHEN m.tipo IN ('JUROS', 'ABATIMENTO', 'QUITACAO')
+                         THEN 1 END
+               ) AS quantidade_recebimentos
+          FROM movimentacoes_emprestimo m
+          JOIN emprestimos e ON e.id = m.emprestimo_id
+         WHERE e.cliente_id = ?
+           AND m.data_movimento BETWEEN ? AND ?
+         GROUP BY substr(m.data_movimento, 1, 7)
+        """,
+        (cliente_id, start_date.isoformat(), end_date.isoformat()),
+    ).fetchall()
+
+    caixa_por_mes = {
+        row["mes_pagamento"]: {
+            "juros_recebidos_centavos": int(row["juros_recebidos_centavos"] or 0),
+            "total_recebido_centavos": int(row["total_recebido_centavos"] or 0),
+            "quantidade_recebimentos": int(row["quantidade_recebimentos"] or 0),
+        }
+        for row in caixa_rows
+    }
+
+    quitacoes = db.execute(
+        """
+        SELECT m.emprestimo_id, MIN(m.data_movimento) AS data_quitacao
+          FROM movimentacoes_emprestimo m
+          JOIN emprestimos e ON e.id = m.emprestimo_id
+         WHERE e.cliente_id = ?
+           AND m.tipo = 'QUITACAO'
+         GROUP BY m.emprestimo_id
+        """,
+        (cliente_id,),
+    ).fetchall()
+
+    quitacao_por_emprestimo = {
+        int(row["emprestimo_id"]): (
+            date.fromisoformat(row["data_quitacao"])
+            if row["data_quitacao"]
+            else None
+        )
+        for row in quitacoes
+    }
+
+    consolidado: dict[str, dict[str, Any]] = {
+        competencia: {
+            "competencia": competencia,
+            "esperado_centavos": 0,
+            "recebido_competencia_centavos": 0,
+            "pendente_centavos": 0,
+            "contratos_previstos": 0,
+            "contratos_pendentes": 0,
+            "datas_pagamento": set(),
+        }
+        for competencia in competencias
+    }
+
+    pendencias: list[dict[str, Any]] = []
+
+    for emprestimo in emprestimos:
+        primeiro_vencimento = primeiro_vencimento_emprestimo(emprestimo)
+        dia_vencimento = int(
+            emprestimo["dia_vencimento"] or primeiro_vencimento.day
+        )
+        data_quitacao = quitacao_por_emprestimo.get(int(emprestimo["id"]))
+
+        for competencia in competencias:
+            vencimento = due_date_for_competence(
+                competencia=competencia,
+                dia_vencimento=dia_vencimento,
+            )
+
+            if vencimento < primeiro_vencimento:
+                continue
+
+            if data_quitacao is not None and data_quitacao < vencimento:
+                continue
+
+            saldo_base = saldo_principal_antes_da_data(
+                db,
+                int(emprestimo["id"]),
+                vencimento,
+            )
+
+            if saldo_base <= 0:
+                continue
+
+            esperado = calcular_juros_centavos(
+                saldo_base,
+                emprestimo["taxa_juros_mensal"],
+            )
+
+            if esperado <= 0:
+                continue
+
+            chave = (int(emprestimo["id"]), competencia)
+            recebido_info = juros_por_contrato_comp.get(
+                chave,
+                {"recebido_centavos": 0, "datas_pagamento": ""},
+            )
+            recebido = int(recebido_info["recebido_centavos"] or 0)
+            pendente = max(esperado - recebido, 0)
+
+            agregado = consolidado[competencia]
+            agregado["esperado_centavos"] += esperado
+            agregado["recebido_competencia_centavos"] += recebido
+            agregado["pendente_centavos"] += pendente
+            agregado["contratos_previstos"] += 1
+
+            datas = [
+                item.strip()
+                for item in str(recebido_info["datas_pagamento"] or "").split(",")
+                if item.strip()
+            ]
+            agregado["datas_pagamento"].update(datas)
+
+            if pendente > 0:
+                agregado["contratos_pendentes"] += 1
+                pendencias.append(
+                    {
+                        "competencia": competencia,
+                        "emprestimo_id": int(emprestimo["id"]),
+                        "descricao": emprestimo["descricao"],
+                        "vencimento": vencimento,
+                        "saldo_base_centavos": saldo_base,
+                        "taxa_juros_mensal": emprestimo["taxa_juros_mensal"],
+                        "esperado_centavos": esperado,
+                        "recebido_centavos": recebido,
+                        "pendente_centavos": pendente,
+                        "datas_pagamento": datas,
+                        "situacao": (
+                            "SEM PAGAMENTO"
+                            if recebido == 0
+                            else "PARCIAL"
+                        ),
+                    }
+                )
+
+    linhas: list[dict[str, Any]] = []
+
+    for competencia in competencias:
+        row = consolidado[competencia]
+        caixa = caixa_por_mes.get(
+            competencia,
+            {
+                "juros_recebidos_centavos": 0,
+                "total_recebido_centavos": 0,
+                "quantidade_recebimentos": 0,
+            },
+        )
+
+        esperado = int(row["esperado_centavos"])
+        recebido_comp = int(row["recebido_competencia_centavos"])
+        pendente = int(row["pendente_centavos"])
+
+        if esperado <= 0:
+            situacao_competencia = "SEM PREVISÃO"
+        elif recebido_comp == 0:
+            situacao_competencia = "SEM PAGAMENTO"
+        elif pendente > 0:
+            situacao_competencia = "PARCIAL"
+        elif recebido_comp > esperado:
+            situacao_competencia = "A MAIOR"
+        else:
+            situacao_competencia = "PAGO"
+
+        juros_mes = int(caixa["juros_recebidos_centavos"])
+        total_mes = int(caixa["total_recebido_centavos"])
+
+        if total_mes == 0:
+            situacao_caixa = "SEM RECEBIMENTO"
+        elif juros_mes == 0:
+            situacao_caixa = "SEM JUROS"
+        else:
+            situacao_caixa = "COM RECEBIMENTO"
+
+        linhas.append(
+            {
+                "competencia": competencia,
+                "esperado_centavos": esperado,
+                "recebido_competencia_centavos": recebido_comp,
+                "pendente_centavos": pendente,
+                "contratos_previstos": int(row["contratos_previstos"]),
+                "contratos_pendentes": int(row["contratos_pendentes"]),
+                "datas_pagamento": sorted(row["datas_pagamento"]),
+                "situacao_competencia": situacao_competencia,
+                "juros_recebidos_mes_centavos": juros_mes,
+                "total_recebido_mes_centavos": total_mes,
+                "quantidade_recebimentos_mes": int(
+                    caixa["quantidade_recebimentos"]
+                ),
+                "situacao_caixa": situacao_caixa,
+            }
+        )
+
+    pendencias.sort(
+        key=lambda item: (
+            item["competencia"],
+            item["emprestimo_id"],
+        )
+    )
+
+    return linhas, pendencias
+
+
+def extrato_movimentacoes_cliente(
+    db: sqlite3.Connection,
+    cliente_id: int,
+    start_date: date,
+    end_date: date,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """
+    Extrato bancário consolidado do cliente.
+
+    Saldo apresentado = principal total ainda emprestado ao cliente após cada
+    lançamento; juros não alteram esse saldo.
+    """
+    emprestimos = db.execute(
+        """
+        SELECT id, data_emprestimo
+          FROM emprestimos
+         WHERE cliente_id = ?
+        """,
+        (cliente_id,),
+    ).fetchall()
+
+    saldo_abertura = 0
+    for emprestimo in emprestimos:
+        data_emprestimo = date.fromisoformat(emprestimo["data_emprestimo"])
+        if data_emprestimo < start_date:
+            saldo_abertura += saldo_principal_antes_da_data(
+                db,
+                int(emprestimo["id"]),
+                start_date,
+            )
+
+    rows = db.execute(
+        """
+        SELECT m.id, m.tipo, m.data_movimento, m.valor_centavos,
+               m.competencia, m.observacao, m.pagamento_integrado_id,
+               m.titulo_receber_id,
+               e.id AS emprestimo_id, e.descricao AS emprestimo_descricao,
+               COALESCE(m.origem_banco_snapshot, co.banco) AS origem_banco,
+               COALESCE(m.origem_pix_snapshot, co.chave_pix) AS origem_pix,
+               COALESCE(m.destino_banco_snapshot, cd.banco) AS destino_banco,
+               COALESCE(m.destino_pix_snapshot, cd.chave_pix) AS destino_pix,
+               u.nome AS usuario_nome
+          FROM movimentacoes_emprestimo m
+          JOIN emprestimos e ON e.id = m.emprestimo_id
+          LEFT JOIN usuarios u ON u.id = m.usuario_id
+          LEFT JOIN contas_bancarias co ON co.id = m.conta_origem_id
+          LEFT JOIN contas_bancarias cd ON cd.id = m.conta_destino_id
+         WHERE e.cliente_id = ?
+           AND m.data_movimento BETWEEN ? AND ?
+         ORDER BY m.data_movimento, m.id
+        """,
+        (cliente_id, start_date.isoformat(), end_date.isoformat()),
+    ).fetchall()
+
+    saldo_principal = saldo_abertura
+    result: list[dict[str, Any]] = []
+
+    total_entradas = 0
+    total_saidas = 0
+    juros_recebidos = 0
+    principal_recebido = 0
+
+    for row in rows:
+        item = dict(row)
+        valor = int(row["valor_centavos"] or 0)
+        tipo = row["tipo"]
+
+        entrada = 0
+        saida = 0
+
+        if tipo == "EMPRESTIMO":
+            saida = valor
+            saldo_principal += valor
+        elif tipo == "JUROS":
+            entrada = valor
+            juros_recebidos += valor
+        elif tipo in {"ABATIMENTO", "QUITACAO"}:
+            entrada = valor
+            principal_recebido += valor
+            saldo_principal = max(0, saldo_principal - valor)
+
+        total_entradas += entrada
+        total_saidas += saida
+
+        mes_pagamento = str(row["data_movimento"])[:7]
+        competencia = row["competencia"]
+
+        item.update(
+            {
+                "entrada_centavos": entrada,
+                "saida_centavos": saida,
+                "saldo_principal_cliente_centavos": saldo_principal,
+                "mes_pagamento": mes_pagamento,
+                "competencia_divergente": bool(
+                    tipo == "JUROS"
+                    and competencia
+                    and competencia != mes_pagamento
+                ),
+            }
+        )
+        result.append(item)
+
+    return result, {
+        "saldo_abertura_centavos": saldo_abertura,
+        "total_entradas_centavos": total_entradas,
+        "total_saidas_centavos": total_saidas,
+        "juros_recebidos_centavos": juros_recebidos,
+        "principal_recebido_centavos": principal_recebido,
+        "fluxo_liquido_centavos": total_entradas - total_saidas,
+        "saldo_principal_final_centavos": saldo_principal,
+    }
 
 
 def get_cliente_or_404(cliente_id: int) -> sqlite3.Row:

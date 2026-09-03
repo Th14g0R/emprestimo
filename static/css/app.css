@@ -727,3 +727,237 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.35; }
         grid-template-columns: 1fr;
     }
 }
+
+
+/* V18 - Extrato financeiro por cliente */
+.client-statement-filter {
+    display: grid;
+    grid-template-columns: minmax(280px, 2fr) minmax(150px, .8fr) minmax(150px, .8fr) auto;
+    gap: .85rem;
+    align-items: end;
+}
+
+.client-statement-filter label {
+    display: grid;
+    gap: .35rem;
+    font-weight: 700;
+}
+
+.statement-filter-actions {
+    display: flex;
+    gap: .5rem;
+    align-items: end;
+}
+
+.statement-metrics {
+    margin-bottom: 1.25rem;
+}
+
+.statement-section {
+    margin-bottom: 1.25rem;
+}
+
+.statement-loans-table,
+.monthly-check-table,
+.bank-statement-table {
+    min-width: 1100px;
+}
+
+.statement-date-chip {
+    display: inline-block;
+    white-space: nowrap;
+    margin: .1rem .15rem .1rem 0;
+    padding: .18rem .42rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    font-size: .78rem;
+}
+
+.statement-status {
+    display: inline-flex;
+    align-items: center;
+    white-space: nowrap;
+    border-radius: 999px;
+    padding: .22rem .5rem;
+    font-size: .73rem;
+    font-weight: 800;
+}
+
+.statement-status-pago,
+.statement-status-com-recebimento {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.statement-status-parcial,
+.statement-status-sem-juros {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.statement-status-sem-pagamento,
+.statement-status-sem-recebimento {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.statement-status-a-maior {
+    background: #e0e7ff;
+    color: #3730a3;
+}
+
+.statement-status-sem-previsão {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.statement-problem-row {
+    background: #fffaf8;
+}
+
+.statement-period-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .75rem;
+    margin-bottom: 1rem;
+}
+
+.statement-period-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: .18rem;
+    padding: .8rem;
+    border: 1px solid var(--border);
+    border-radius: .75rem;
+    background: #f8fafc;
+}
+
+.statement-period-summary span {
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+.statement-period-summary strong {
+    font-size: 1.05rem;
+}
+
+.statement-credit {
+    color: #166534;
+    font-weight: 700;
+}
+
+.statement-debit {
+    color: #991b1b;
+    font-weight: 700;
+}
+
+.statement-mismatch {
+    display: inline-block;
+    margin-top: .2rem;
+    padding: .16rem .4rem;
+    border-radius: .4rem;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: .72rem;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.statement-flow {
+    min-width: 170px;
+}
+
+.statement-flow span,
+.statement-flow small {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.statement-flow .flow-arrow {
+    margin: .2rem 0;
+    color: var(--muted);
+}
+
+.print-only {
+    display: none;
+}
+
+@media (max-width: 1000px) {
+    .client-statement-filter {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .statement-period-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 700px) {
+    .client-statement-filter,
+    .statement-period-summary {
+        grid-template-columns: 1fr;
+    }
+
+    .statement-filter-actions {
+        flex-wrap: wrap;
+    }
+}
+
+@media print {
+    .topbar,
+    .no-print,
+    .messages {
+        display: none !important;
+    }
+
+    body {
+        background: #fff !important;
+        color: #000;
+    }
+
+    .container,
+    .page {
+        width: 100% !important;
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    .print-only {
+        display: flex;
+    }
+
+    .statement-identification {
+        justify-content: space-between;
+        gap: 2rem;
+        padding: 0 0 .75rem;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #999;
+    }
+
+    .card {
+        box-shadow: none !important;
+        border: 1px solid #bbb !important;
+        break-inside: avoid;
+    }
+
+    .table-responsive {
+        overflow: visible !important;
+    }
+
+    table {
+        font-size: 8.5pt;
+    }
+
+    a {
+        color: #000 !important;
+        text-decoration: none !important;
+    }
+
+    .statement-loans-table,
+    .monthly-check-table,
+    .bank-statement-table {
+        min-width: 0 !important;
+        width: 100%;
+    }
+}
