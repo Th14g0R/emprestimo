@@ -77,7 +77,7 @@
                 <h2>3. Títulos em aberto</h2>
                 <p class="muted section-subtitle">
                     Se o juro já aparece em <strong>A Receber</strong>, selecione-o aqui.
-                    Ele será baixado e transformado na movimentação de juros do empréstimo.
+                    Informe quanto foi recebido agora. Se for menor que o documento, o saldo continuará em aberto.
                 </p>
             </div>
             <div class="integrated-sum-box">
@@ -98,7 +98,8 @@
                         <th>Status</th>
                         <th>Saldo-base</th>
                         <th>Taxa</th>
-                        <th class="text-right">Juros</th>
+                        <th class="text-right">Saldo do documento</th>
+                        <th>Receber agora</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -126,6 +127,18 @@
                         <td>{{ titulo['saldo_base_centavos']|money }}</td>
                         <td>{{ titulo['taxa_juros_mensal']|percent_br }}</td>
                         <td class="text-right"><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></td>
+                        <td>
+                            <input
+                                class="integrated-title-value"
+                                type="text"
+                                name="valor_titulo_{{ titulo['id'] }}"
+                                value="{{ request.form.get('valor_titulo_' ~ titulo['id'], (titulo['valor_previsto_centavos']|money).replace('R$ ', '')) }}"
+                                inputmode="decimal"
+                            >
+                            {% if titulo['natureza'] == 'SALDO_JUROS' %}
+                                <small class="field-help">Saldo do título #{{ titulo['titulo_origem_id'] }}</small>
+                            {% endif %}
+                        </td>
                     </tr>
                 {% endfor %}
                 </tbody>
@@ -160,7 +173,7 @@
                     <th class="text-right">Saldo atual</th>
                     <th>Taxa</th>
                     <th>Competência</th>
-                    <th>Juros</th>
+                    <th>Receber agora</th>
                 </tr>
             </thead>
             <tbody>
@@ -193,9 +206,11 @@
         <div class="info-box integrated-info">
             <strong>Como o lançamento é validado</strong>
             <p>
-                Títulos em aberto usam o valor previsto já registrado. Nos itens manuais,
-                o sistema reconstrói o saldo principal existente na data do pagamento e exige
-                o juro integral correspondente à taxa do empréstimo.
+                Nos títulos em aberto você pode receber o valor integral ou apenas uma parte.
+                Se receber menos, o documento fica como <strong>PARCIAL</strong> e o sistema gera
+                automaticamente um novo <strong>SALDO DE JUROS</strong>, com a mesma competência
+                e vencimento, relacionado ao documento anterior. Nos itens manuais, o sistema
+                reconstrói o juro integral devido e também permite registrar apenas a parcela efetivamente recebida.
             </p>
         </div>
 
@@ -259,10 +274,11 @@
 
         for (const check of titleChecks) {
             const row = check.closest('tr');
+            const value = row.querySelector('.integrated-title-value');
             row.classList.toggle('integrated-selected-row', check.checked);
 
-            if (check.checked) {
-                totalRateado += Number(check.dataset.centavos || 0) / 100;
+            if (check.checked && value) {
+                totalRateado += parseBR(value.value);
             }
         }
 

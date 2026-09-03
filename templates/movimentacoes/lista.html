@@ -105,6 +105,11 @@
                 {% if mov['observacao'] %}
                     <div class="movement-note">{{ mov['observacao'] }}</div>
                 {% endif %}
+                {% if mov['titulo_receber_id'] %}
+                    <a class="integrated-payment-link" href="{{ url_for('titulos_receber_detalhe', titulo_id=mov['titulo_receber_id']) }}">
+                        Título #{{ mov['titulo_receber_id'] }}
+                    </a>
+                {% endif %}
                 {% if mov['pagamento_integrado_id'] %}
                     <a class="integrated-payment-link" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">
                         Pagamento integrado #{{ mov['pagamento_integrado_id'] }}

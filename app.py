@@ -252,25 +252,31 @@ def init_db() -> None:
             competencia TEXT NOT NULL,
             data_vencimento TEXT NOT NULL,
             valor_previsto_centavos INTEGER NOT NULL CHECK (valor_previsto_centavos >= 0),
+            valor_recebido_centavos INTEGER NOT NULL DEFAULT 0 CHECK (valor_recebido_centavos >= 0),
             saldo_base_centavos INTEGER NOT NULL CHECK (saldo_base_centavos >= 0),
             taxa_juros_mensal REAL NOT NULL CHECK (taxa_juros_mensal >= 0),
             status TEXT NOT NULL DEFAULT 'PREVISTO'
-                CHECK (status IN ('PREVISTO', 'VENCIDO', 'RECEBIDO', 'CANCELADO')),
+                CHECK (status IN ('PREVISTO', 'VENCIDO', 'PARCIAL', 'RECEBIDO', 'CANCELADO')),
             movimentacao_id INTEGER,
             data_recebimento TEXT,
             observacao TEXT,
             ajuste_manual INTEGER NOT NULL DEFAULT 0
                 CHECK (ajuste_manual IN (0, 1)),
+            titulo_origem_id INTEGER,
+            natureza TEXT NOT NULL DEFAULT 'JUROS'
+                CHECK (natureza IN ('JUROS', 'SALDO_JUROS')),
+            sequencia INTEGER NOT NULL DEFAULT 1 CHECK (sequencia >= 1),
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (emprestimo_id) REFERENCES emprestimos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
             FOREIGN KEY (movimentacao_id) REFERENCES movimentacoes_emprestimo(id) ON UPDATE CASCADE ON DELETE SET NULL,
-            UNIQUE (emprestimo_id, tipo, competencia)
+            FOREIGN KEY (titulo_origem_id) REFERENCES titulos_receber(id) ON UPDATE CASCADE ON DELETE RESTRICT
         );
 
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_vencimento ON titulos_receber(data_vencimento);
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status);
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id);
+        CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia);
 
         CREATE TABLE IF NOT EXISTS pagamentos_integrados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -453,8 +459,122 @@ def add_column_if_missing(
         )
 
 
+def migrate_titulos_receber_v16(db: sqlite3.Connection) -> None:
+    """
+    V16: permite vários documentos de juros da mesma competência.
+
+    Isto é necessário para recebimentos parciais: o documento original fica
+    marcado como PARCIAL e é criado um novo documento SALDO_JUROS, relacionado
+    ao anterior, com o valor que ainda falta receber.
+
+    A tabela antiga possuía UNIQUE (emprestimo_id, tipo, competencia) e o CHECK
+    de status não aceitava PARCIAL; por isso esta migração precisa reconstruir
+    a tabela preservando os IDs e os dados existentes.
+    """
+    row = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'titulos_receber'"
+    ).fetchone()
+    if row is None:
+        return
+
+    columns = table_columns(db, "titulos_receber")
+    table_sql = (row["sql"] or "").upper()
+    needs_rebuild = (
+        "titulo_origem_id" not in columns
+        or "valor_recebido_centavos" not in columns
+        or "natureza" not in columns
+        or "sequencia" not in columns
+        or "PARCIAL" not in table_sql
+        or "UNIQUE (EMPRESTIMO_ID, TIPO, COMPETENCIA)" in table_sql
+    )
+    if not needs_rebuild:
+        return
+
+    db.commit()
+    foreign_keys_enabled = int(db.execute("PRAGMA foreign_keys").fetchone()[0])
+    db.execute("PRAGMA foreign_keys = OFF")
+
+    try:
+        db.execute("BEGIN")
+        db.execute("DROP TABLE IF EXISTS titulos_receber_v16")
+        db.execute(
+            """
+            CREATE TABLE titulos_receber_v16 (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                emprestimo_id INTEGER NOT NULL,
+                tipo TEXT NOT NULL DEFAULT 'JUROS' CHECK (tipo IN ('JUROS')),
+                competencia TEXT NOT NULL,
+                data_vencimento TEXT NOT NULL,
+                valor_previsto_centavos INTEGER NOT NULL CHECK (valor_previsto_centavos >= 0),
+                valor_recebido_centavos INTEGER NOT NULL DEFAULT 0 CHECK (valor_recebido_centavos >= 0),
+                saldo_base_centavos INTEGER NOT NULL CHECK (saldo_base_centavos >= 0),
+                taxa_juros_mensal REAL NOT NULL CHECK (taxa_juros_mensal >= 0),
+                status TEXT NOT NULL DEFAULT 'PREVISTO'
+                    CHECK (status IN ('PREVISTO', 'VENCIDO', 'PARCIAL', 'RECEBIDO', 'CANCELADO')),
+                movimentacao_id INTEGER,
+                data_recebimento TEXT,
+                observacao TEXT,
+                ajuste_manual INTEGER NOT NULL DEFAULT 0 CHECK (ajuste_manual IN (0, 1)),
+                titulo_origem_id INTEGER,
+                natureza TEXT NOT NULL DEFAULT 'JUROS'
+                    CHECK (natureza IN ('JUROS', 'SALDO_JUROS')),
+                sequencia INTEGER NOT NULL DEFAULT 1 CHECK (sequencia >= 1),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (emprestimo_id) REFERENCES emprestimos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+                FOREIGN KEY (movimentacao_id) REFERENCES movimentacoes_emprestimo(id) ON UPDATE CASCADE ON DELETE SET NULL,
+                FOREIGN KEY (titulo_origem_id) REFERENCES titulos_receber_v16(id) ON UPDATE CASCADE ON DELETE RESTRICT
+            )
+            """
+        )
+
+        ajuste_expr = "ajuste_manual" if "ajuste_manual" in columns else "0"
+        recebido_expr = (
+            "valor_recebido_centavos"
+            if "valor_recebido_centavos" in columns
+            else "CASE WHEN status = 'RECEBIDO' THEN valor_previsto_centavos ELSE 0 END"
+        )
+        origem_expr = "titulo_origem_id" if "titulo_origem_id" in columns else "NULL"
+        natureza_expr = "natureza" if "natureza" in columns else "'JUROS'"
+        sequencia_expr = "sequencia" if "sequencia" in columns else "1"
+
+        db.execute(
+            f"""
+            INSERT INTO titulos_receber_v16 (
+                id, emprestimo_id, tipo, competencia, data_vencimento,
+                valor_previsto_centavos, valor_recebido_centavos,
+                saldo_base_centavos, taxa_juros_mensal, status,
+                movimentacao_id, data_recebimento, observacao, ajuste_manual,
+                titulo_origem_id, natureza, sequencia, created_at, updated_at
+            )
+            SELECT
+                id, emprestimo_id, tipo, competencia, data_vencimento,
+                valor_previsto_centavos, {recebido_expr},
+                saldo_base_centavos, taxa_juros_mensal, status,
+                movimentacao_id, data_recebimento, observacao, {ajuste_expr},
+                {origem_expr}, {natureza_expr}, {sequencia_expr}, created_at, updated_at
+              FROM titulos_receber
+            """
+        )
+
+        db.execute("DROP TABLE titulos_receber")
+        db.execute("ALTER TABLE titulos_receber_v16 RENAME TO titulos_receber")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_vencimento ON titulos_receber(data_vencimento)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_origem ON titulos_receber(titulo_origem_id)")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.execute(f"PRAGMA foreign_keys = {1 if foreign_keys_enabled else 0}")
+
+
 def migrate_schema(db: sqlite3.Connection) -> None:
     """Aplica pequenas evoluções de schema sem apagar o banco existente."""
+    migrate_titulos_receber_v16(db)
     add_column_if_missing(db, "movimentacoes_emprestimo", "competencia", "TEXT")
     add_column_if_missing(db, "movimentacoes_emprestimo", "usuario_id", "INTEGER")
     add_column_if_missing(
@@ -479,7 +599,12 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     add_column_if_missing(db, "movimentacoes_emprestimo", "updated_at", "TEXT")
     add_column_if_missing(db, "movimentacoes_emprestimo", "usuario_ultima_alteracao_id", "INTEGER")
     add_column_if_missing(db, "movimentacoes_emprestimo", "pagamento_integrado_id", "INTEGER")
+    add_column_if_missing(db, "movimentacoes_emprestimo", "titulo_receber_id", "INTEGER")
     add_column_if_missing(db, "titulos_receber", "ajuste_manual", "INTEGER NOT NULL DEFAULT 0")
+    add_column_if_missing(db, "titulos_receber", "valor_recebido_centavos", "INTEGER NOT NULL DEFAULT 0")
+    add_column_if_missing(db, "titulos_receber", "titulo_origem_id", "INTEGER")
+    add_column_if_missing(db, "titulos_receber", "natureza", "TEXT NOT NULL DEFAULT 'JUROS'")
+    add_column_if_missing(db, "titulos_receber", "sequencia", "INTEGER NOT NULL DEFAULT 1")
     add_column_if_missing(db, "pagamentos_integrados_itens", "titulo_receber_id", "INTEGER")
     add_column_if_missing(
         db,
@@ -504,6 +629,13 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_itens_titulo ON pagamentos_integrados_itens(titulo_receber_id)"
     )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_titulos_receber_origem ON titulos_receber(titulo_origem_id)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia)"
+    )
+
 
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_movimentacoes_conta_origem ON movimentacoes_emprestimo(conta_origem_id)"
@@ -518,12 +650,40 @@ def migrate_schema(db: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_parcelas_conta_destino ON parcelas_cartao(conta_destino_id)"
     )
 
+    # Até a V15 existia um índice UNIQUE por empréstimo/competência.
+    # Recebimentos parciais precisam permitir várias movimentações JUROS para
+    # a mesma competência, cada uma vinculada ao documento que foi baixado.
+    db.execute("DROP INDEX IF EXISTS uq_juros_emprestimo_competencia")
     db.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_juros_emprestimo_competencia
+        CREATE INDEX IF NOT EXISTS idx_juros_emprestimo_competencia
             ON movimentacoes_emprestimo(emprestimo_id, competencia)
          WHERE tipo = 'JUROS'
            AND competencia IS NOT NULL
+        """
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_movimentacoes_titulo_receber "
+        "ON movimentacoes_emprestimo(titulo_receber_id)"
+    )
+
+    # Retrocompatibilidade: vincula movimentos antigos aos títulos que já
+    # armazenavam movimentacao_id.
+    db.execute(
+        """
+        UPDATE movimentacoes_emprestimo
+           SET titulo_receber_id = (
+               SELECT t.id
+                 FROM titulos_receber t
+                WHERE t.movimentacao_id = movimentacoes_emprestimo.id
+                LIMIT 1
+           )
+         WHERE titulo_receber_id IS NULL
+           AND EXISTS (
+               SELECT 1
+                 FROM titulos_receber t
+                WHERE t.movimentacao_id = movimentacoes_emprestimo.id
+           )
         """
     )
 
@@ -866,17 +1026,41 @@ def get_receivable_periods(reference: date | None = None) -> dict[str, dict[str,
     }
 
 
-def receivable_period_summary(db: sqlite3.Connection, start_date: date, end_date: date) -> dict[str, int]:
+def receivable_period_summary(
+    db: sqlite3.Connection,
+    start_date: date,
+    end_date: date,
+) -> dict[str, int]:
     start_iso = start_date.isoformat()
     end_iso = end_date.isoformat()
 
     titulo = db.execute(
         """
         SELECT
-            COALESCE(SUM(CASE WHEN status <> 'CANCELADO' THEN valor_previsto_centavos ELSE 0 END), 0) AS previsto_centavos,
-            COALESCE(SUM(CASE WHEN status IN ('PREVISTO', 'VENCIDO') THEN valor_previsto_centavos ELSE 0 END), 0) AS pendente_centavos,
-            COALESCE(SUM(CASE WHEN status = 'RECEBIDO' THEN valor_previsto_centavos ELSE 0 END), 0) AS titulos_recebidos_centavos,
-            COALESCE(SUM(CASE WHEN status IN ('PREVISTO', 'VENCIDO') THEN 1 ELSE 0 END), 0) AS titulos_pendentes
+            COALESCE(SUM(
+                CASE
+                    WHEN titulo_origem_id IS NULL AND status <> 'CANCELADO'
+                    THEN valor_previsto_centavos
+                    ELSE 0
+                END
+            ), 0) AS previsto_centavos,
+            COALESCE(SUM(
+                CASE
+                    WHEN status IN ('PREVISTO', 'VENCIDO')
+                    THEN valor_previsto_centavos
+                    ELSE 0
+                END
+            ), 0) AS pendente_centavos,
+            COALESCE(SUM(
+                CASE
+                    WHEN status IN ('PARCIAL', 'RECEBIDO')
+                    THEN valor_recebido_centavos
+                    ELSE 0
+                END
+            ), 0) AS titulos_recebidos_centavos,
+            COALESCE(SUM(
+                CASE WHEN status IN ('PREVISTO', 'VENCIDO') THEN 1 ELSE 0 END
+            ), 0) AS titulos_pendentes
           FROM titulos_receber
          WHERE data_vencimento BETWEEN ? AND ?
         """,
@@ -905,58 +1089,96 @@ def receivable_period_summary(db: sqlite3.Connection, start_date: date, end_date
 
 
 def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> None:
+    """
+    Sincroniza somente previsões automáticas.
+
+    Documentos ajustados manualmente e documentos SALDO_JUROS não são
+    reconciliados por uma busca genérica de competência, pois uma mesma
+    competência pode possuir várias movimentações quando houve pagamentos
+    parciais.
+    """
     today = date.today()
     current_month = first_day_of_month(today)
 
     existing_titles = db.execute(
         """
-        SELECT id, emprestimo_id, competencia, data_vencimento, status, movimentacao_id
+        SELECT id, emprestimo_id, competencia, data_vencimento, status,
+               movimentacao_id, ajuste_manual, titulo_origem_id, natureza
           FROM titulos_receber
          WHERE tipo = 'JUROS'
         """
     ).fetchall()
 
     for titulo in existing_titles:
-        movement = db.execute(
+        due = date.fromisoformat(titulo["data_vencimento"])
+
+        if titulo["status"] in {"CANCELADO", "PARCIAL"}:
+            continue
+
+        if titulo["status"] == "RECEBIDO":
+            # Um título recebido permanece histórico. Se a movimentação foi
+            # excluída por uma operação de correção, a rotina de exclusão é
+            # responsável por reabrir o documento correspondente.
+            continue
+
+        expected_status = "VENCIDO" if due < today else "PREVISTO"
+
+        # Saldos parciais e ajustes manuais têm vida própria. Apenas atualiza
+        # PREVISTO/VENCIDO conforme a data.
+        if (
+            titulo["titulo_origem_id"] is not None
+            or int(titulo["ajuste_manual"] or 0)
+            or titulo["natureza"] == "SALDO_JUROS"
+        ):
+            if titulo["status"] != expected_status:
+                db.execute(
+                    "UPDATE titulos_receber SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (expected_status, titulo["id"]),
+                )
+            continue
+
+        # Compatibilidade com lançamentos antigos: só vincula automaticamente
+        # quando há exatamente uma movimentação sem título para a competência.
+        movements = db.execute(
             """
-            SELECT id, data_movimento
+            SELECT id, data_movimento, titulo_receber_id
               FROM movimentacoes_emprestimo
              WHERE emprestimo_id = ?
                AND tipo = 'JUROS'
                AND competencia = ?
-             ORDER BY id DESC
-             LIMIT 1
+             ORDER BY id
             """,
             (titulo["emprestimo_id"], titulo["competencia"]),
-        ).fetchone()
+        ).fetchall()
 
-        if movement is not None:
+        linked = next(
+            (m for m in movements if m["titulo_receber_id"] == titulo["id"]),
+            None,
+        )
+        if linked is None and len(movements) == 1 and movements[0]["titulo_receber_id"] is None:
+            linked = movements[0]
+
+        if linked is not None:
             db.execute(
                 """
                 UPDATE titulos_receber
                    SET status = 'RECEBIDO',
+                       valor_recebido_centavos = valor_previsto_centavos,
                        movimentacao_id = ?,
                        data_recebimento = ?,
                        updated_at = CURRENT_TIMESTAMP
                  WHERE id = ?
                 """,
-                (movement["id"], movement["data_movimento"], titulo["id"]),
+                (linked["id"], linked["data_movimento"], titulo["id"]),
             )
+            if linked["titulo_receber_id"] is None:
+                db.execute(
+                    "UPDATE movimentacoes_emprestimo SET titulo_receber_id = ? WHERE id = ?",
+                    (titulo["id"], linked["id"]),
+                )
             continue
 
-        due = date.fromisoformat(titulo["data_vencimento"])
-        expected_status = "VENCIDO" if due < today else "PREVISTO"
-        if titulo["status"] == "RECEBIDO":
-            db.execute(
-                """
-                UPDATE titulos_receber
-                   SET status = ?, movimentacao_id = NULL, data_recebimento = NULL,
-                       updated_at = CURRENT_TIMESTAMP
-                 WHERE id = ?
-                """,
-                (expected_status, titulo["id"]),
-            )
-        elif titulo["status"] in {"PREVISTO", "VENCIDO"} and titulo["status"] != expected_status:
+        if titulo["status"] != expected_status:
             db.execute(
                 "UPDATE titulos_receber SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                 (expected_status, titulo["id"]),
@@ -980,7 +1202,9 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
         else:
             base_due = add_months_iso(loan_date, 1)
             due_day = int(emprestimo["dia_vencimento"] or base_due.day)
-            first_due = base_due.replace(day=min(due_day, monthrange(base_due.year, base_due.month)[1]))
+            first_due = base_due.replace(
+                day=min(due_day, monthrange(base_due.year, base_due.month)[1])
+            )
 
         due_day = int(emprestimo["dia_vencimento"] or first_due.day)
 
@@ -991,38 +1215,37 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
             if due < first_due:
                 continue
 
-            actual = db.execute(
+            # Qualquer documento já existente para esta competência (inclusive
+            # CANCELADO/PARCIAL/SALDO) impede a recriação automática.
+            titulo = db.execute(
                 """
-                SELECT id, data_movimento
-                  FROM movimentacoes_emprestimo
+                SELECT id, status, data_vencimento, ajuste_manual,
+                       titulo_origem_id, natureza
+                  FROM titulos_receber
                  WHERE emprestimo_id = ?
                    AND tipo = 'JUROS'
                    AND competencia = ?
-                 ORDER BY id DESC LIMIT 1
+                 ORDER BY sequencia DESC, id DESC
+                 LIMIT 1
                 """,
                 (emprestimo["id"], competencia),
             ).fetchone()
 
-            titulo = db.execute(
-                """
-                SELECT id, status, data_vencimento, ajuste_manual
-                  FROM titulos_receber
-                 WHERE emprestimo_id = ? AND tipo = 'JUROS' AND competencia = ?
-                """,
-                (emprestimo["id"], competencia),
-            ).fetchone()
+            movements_count = int(
+                db.execute(
+                    """
+                    SELECT COUNT(*) AS qtd
+                      FROM movimentacoes_emprestimo
+                     WHERE emprestimo_id = ?
+                       AND tipo = 'JUROS'
+                       AND competencia = ?
+                    """,
+                    (emprestimo["id"], competencia),
+                ).fetchone()["qtd"]
+            )
 
-            if actual is not None:
-                if titulo is not None:
-                    db.execute(
-                        """
-                        UPDATE titulos_receber
-                           SET status = 'RECEBIDO', movimentacao_id = ?,
-                               data_recebimento = ?, updated_at = CURRENT_TIMESTAMP
-                         WHERE id = ?
-                        """,
-                        (actual["id"], actual["data_movimento"], titulo["id"]),
-                    )
+            if titulo is None and movements_count > 0:
+                # Lançamento histórico/manual já realizado sem título.
                 continue
 
             amount = calcular_juros_centavos(
@@ -1038,9 +1261,10 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
                     """
                     INSERT INTO titulos_receber (
                         emprestimo_id, tipo, competencia, data_vencimento,
-                        valor_previsto_centavos, saldo_base_centavos,
-                        taxa_juros_mensal, status
-                    ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?)
+                        valor_previsto_centavos, valor_recebido_centavos,
+                        saldo_base_centavos, taxa_juros_mensal, status,
+                        natureza, sequencia
+                    ) VALUES (?, 'JUROS', ?, ?, ?, 0, ?, ?, ?, 'JUROS', 1)
                     """,
                     (
                         emprestimo["id"], competencia, due.isoformat(), amount,
@@ -1051,6 +1275,8 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
             elif (
                 titulo["status"] == "PREVISTO"
                 and not int(titulo["ajuste_manual"] or 0)
+                and titulo["titulo_origem_id"] is None
+                and titulo["natureza"] == "JUROS"
                 and date.fromisoformat(titulo["data_vencimento"]) >= today
             ):
                 db.execute(
@@ -1269,8 +1495,189 @@ def titulo_receber_para_auditoria(
         "data_recebimento",
         "observacao",
         "ajuste_manual",
+        "valor_recebido_centavos",
+        "titulo_origem_id",
+        "natureza",
+        "sequencia",
     )
     return {key: row[key] for key in keys if key in row.keys()}
+
+
+def status_aberto_por_vencimento(data_vencimento: str | date) -> str:
+    due = (
+        data_vencimento
+        if isinstance(data_vencimento, date)
+        else date.fromisoformat(str(data_vencimento)[:10])
+    )
+    return "VENCIDO" if due < date.today() else "PREVISTO"
+
+
+def criar_titulo_saldo_juros(
+    db: sqlite3.Connection,
+    titulo_origem_id: int,
+    valor_saldo_centavos: int,
+    *,
+    observacao: str | None = None,
+) -> int:
+    """Cria o próximo documento de saldo para um juro recebido parcialmente."""
+    origem = db.execute(
+        "SELECT * FROM titulos_receber WHERE id = ?",
+        (titulo_origem_id,),
+    ).fetchone()
+    if origem is None:
+        raise ValueError("Título de origem não encontrado.")
+    if valor_saldo_centavos <= 0:
+        raise ValueError("O saldo residual deve ser maior que zero.")
+
+    status = status_aberto_por_vencimento(origem["data_vencimento"])
+    sequencia = int(origem["sequencia"] or 1) + 1
+    texto = observacao or (
+        f"Saldo remanescente do título #{titulo_origem_id} após recebimento parcial."
+    )
+
+    cursor = db.execute(
+        """
+        INSERT INTO titulos_receber (
+            emprestimo_id, tipo, competencia, data_vencimento,
+            valor_previsto_centavos, valor_recebido_centavos,
+            saldo_base_centavos, taxa_juros_mensal, status,
+            observacao, ajuste_manual, titulo_origem_id,
+            natureza, sequencia
+        ) VALUES (?, 'JUROS', ?, ?, ?, 0, ?, ?, ?, ?, 1, ?, 'SALDO_JUROS', ?)
+        """,
+        (
+            origem["emprestimo_id"],
+            origem["competencia"],
+            origem["data_vencimento"],
+            valor_saldo_centavos,
+            origem["saldo_base_centavos"],
+            origem["taxa_juros_mensal"],
+            status,
+            texto,
+            titulo_origem_id,
+            sequencia,
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def aplicar_recebimento_titulo(
+    db: sqlite3.Connection,
+    *,
+    titulo_id: int,
+    valor_recebido_centavos: int,
+    movimentacao_id: int,
+    data_recebimento: date,
+    observacao: str | None = None,
+) -> int | None:
+    """
+    Baixa integralmente um título ou o marca como PARCIAL e cria o documento
+    residual. Retorna o id do novo saldo quando houver pagamento parcial.
+    """
+    titulo = db.execute(
+        "SELECT * FROM titulos_receber WHERE id = ?",
+        (titulo_id,),
+    ).fetchone()
+    if titulo is None:
+        raise ValueError("Título a receber não encontrado.")
+    if titulo["status"] not in {"PREVISTO", "VENCIDO"}:
+        raise ValueError("O título selecionado não está mais em aberto.")
+
+    valor_documento = int(titulo["valor_previsto_centavos"])
+    if valor_recebido_centavos <= 0:
+        raise ValueError("O valor recebido deve ser maior que zero.")
+    if valor_recebido_centavos > valor_documento:
+        raise ValueError(
+            f"O recebimento não pode ser maior que {format_money(valor_documento)}."
+        )
+
+    if valor_recebido_centavos == valor_documento:
+        db.execute(
+            """
+            UPDATE titulos_receber
+               SET status = 'RECEBIDO',
+                   valor_recebido_centavos = ?,
+                   movimentacao_id = ?,
+                   data_recebimento = ?,
+                   observacao = COALESCE(?, observacao),
+                   updated_at = CURRENT_TIMESTAMP
+             WHERE id = ?
+            """,
+            (
+                valor_recebido_centavos,
+                movimentacao_id,
+                data_recebimento.isoformat(),
+                normalize_optional(observacao),
+                titulo_id,
+            ),
+        )
+        return None
+
+    saldo = valor_documento - valor_recebido_centavos
+    db.execute(
+        """
+        UPDATE titulos_receber
+           SET status = 'PARCIAL',
+               valor_recebido_centavos = ?,
+               movimentacao_id = ?,
+               data_recebimento = ?,
+               observacao = COALESCE(?, observacao),
+               ajuste_manual = 1,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?
+        """,
+        (
+            valor_recebido_centavos,
+            movimentacao_id,
+            data_recebimento.isoformat(),
+            normalize_optional(observacao),
+            titulo_id,
+        ),
+    )
+
+    return criar_titulo_saldo_juros(
+        db,
+        titulo_id,
+        saldo,
+        observacao=(
+            f"Saldo de {format_money(saldo)} originado do título #{titulo_id}. "
+            f"Recebido parcialmente: {format_money(valor_recebido_centavos)}."
+        ),
+    )
+
+
+def criar_titulo_manual_parcial(
+    db: sqlite3.Connection,
+    *,
+    emprestimo_id: int,
+    competencia: str,
+    data_vencimento: date,
+    valor_integral_centavos: int,
+    saldo_base_centavos: int,
+    taxa_juros_mensal: Any,
+) -> int:
+    """Cria o documento original quando um juro histórico nasce de pagamento parcial."""
+    cursor = db.execute(
+        """
+        INSERT INTO titulos_receber (
+            emprestimo_id, tipo, competencia, data_vencimento,
+            valor_previsto_centavos, valor_recebido_centavos,
+            saldo_base_centavos, taxa_juros_mensal, status,
+            observacao, ajuste_manual, natureza, sequencia
+        ) VALUES (?, 'JUROS', ?, ?, ?, 0, ?, ?, ?, ?, 1, 'JUROS', 1)
+        """,
+        (
+            emprestimo_id,
+            competencia,
+            data_vencimento.isoformat(),
+            valor_integral_centavos,
+            saldo_base_centavos,
+            taxa_juros_mensal,
+            status_aberto_por_vencimento(data_vencimento),
+            "Documento criado a partir de recebimento histórico parcial.",
+        ),
+    )
+    return int(cursor.lastrowid)
 
 
 def get_pagamento_integrado_or_404(pagamento_id: int) -> sqlite3.Row:
@@ -1707,7 +2114,8 @@ def register_routes(app: Flask) -> None:
         proximos_titulos = db.execute(
             """
             SELECT t.id, t.competencia, t.data_vencimento,
-                   t.valor_previsto_centavos, t.status,
+                   t.valor_previsto_centavos, t.status, t.natureza,
+                   t.titulo_origem_id,
                    e.id AS emprestimo_id, c.nome AS cliente_nome
               FROM titulos_receber t
               JOIN emprestimos e ON e.id = t.emprestimo_id
@@ -2881,6 +3289,7 @@ def register_routes(app: Flask) -> None:
                     """
                     SELECT id, data_emprestimo, valor_original_centavos,
                            saldo_atual_centavos, taxa_juros_mensal,
+                           data_primeiro_vencimento, dia_vencimento,
                            status, descricao
                       FROM emprestimos
                      WHERE cliente_id = ?
@@ -2893,21 +3302,16 @@ def register_routes(app: Flask) -> None:
                     """
                     SELECT t.id, t.emprestimo_id, t.competencia,
                            t.data_vencimento, t.valor_previsto_centavos,
+                           t.valor_recebido_centavos,
                            t.saldo_base_centavos, t.taxa_juros_mensal,
-                           t.status, t.observacao,
-                           e.descricao,
-                           e.data_emprestimo
+                           t.status, t.observacao, t.titulo_origem_id,
+                           t.natureza, t.sequencia,
+                           e.descricao, e.data_emprestimo
                       FROM titulos_receber t
                       JOIN emprestimos e ON e.id = t.emprestimo_id
                      WHERE e.cliente_id = ?
                        AND t.status IN ('PREVISTO', 'VENCIDO')
-                       AND NOT EXISTS (
-                           SELECT 1
-                             FROM movimentacoes_emprestimo m
-                            WHERE m.emprestimo_id = t.emprestimo_id
-                              AND m.tipo = 'JUROS'
-                              AND m.competencia = t.competencia
-                       )
+                       AND t.movimentacao_id IS NULL
                      ORDER BY
                            CASE WHEN t.status = 'VENCIDO' THEN 0 ELSE 1 END,
                            t.data_vencimento,
@@ -2978,13 +3382,12 @@ def register_routes(app: Flask) -> None:
             total_rateado = 0
             pares_usados: set[tuple[int, str]] = set()
 
-            # 1) Títulos já em aberto. Esses itens usam exatamente a previsão
-            # existente; a confirmação integrada transforma o título em RECEBIDO.
+            # 1) Títulos já em aberto. O usuário pode baixar o valor integral
+            # ou apenas uma parte. No pagamento parcial, o título selecionado
+            # vira PARCIAL e nasce um novo SALDO_JUROS com a mesma competência
+            # e vencimento, relacionado ao documento anterior.
             if cliente is not None:
-                titulos_by_id = {
-                    int(row["id"]): row
-                    for row in titulos_abertos
-                }
+                titulos_by_id = {int(row["id"]): row for row in titulos_abertos}
 
                 for titulo_id in selected_title_ids:
                     titulo = titulos_by_id.get(titulo_id)
@@ -3007,29 +3410,24 @@ def register_routes(app: Flask) -> None:
                         )
                         continue
 
-                    duplicate = db.execute(
-                        """
-                        SELECT id
-                          FROM movimentacoes_emprestimo
-                         WHERE emprestimo_id = ?
-                           AND tipo = 'JUROS'
-                           AND competencia = ?
-                         LIMIT 1
-                        """,
-                        par,
-                    ).fetchone()
+                    valor_documento = int(titulo["valor_previsto_centavos"])
+                    valor_item = parse_money_to_centavos(
+                        request.form.get(
+                            f"valor_titulo_{titulo_id}",
+                            format_money(valor_documento).replace("R$ ", ""),
+                        )
+                    )
 
-                    if duplicate is not None:
+                    if valor_item is None or valor_item <= 0:
                         errors.append(
-                            f"O título #{titulo_id} já possui uma movimentação de juros "
-                            "associada. Atualize a tela e tente novamente."
+                            f"Informe o valor recebido do título #{titulo_id}."
                         )
                         continue
 
-                    valor_item = int(titulo["valor_previsto_centavos"])
-                    if valor_item <= 0:
+                    if valor_item > valor_documento:
                         errors.append(
-                            f"O título #{titulo_id} possui valor inválido."
+                            f"Título #{titulo_id}: o valor recebido não pode superar "
+                            f"o saldo do documento ({format_money(valor_documento)})."
                         )
                         continue
 
@@ -3038,16 +3436,21 @@ def register_routes(app: Flask) -> None:
                         {
                             "emprestimo_id": par[0],
                             "competencia": par[1],
-                            "valor_centavos": valor_item,
+                            "valor_centavos": int(valor_item),
+                            "valor_integral_centavos": valor_documento,
                             "saldo_base_centavos": int(titulo["saldo_base_centavos"]),
                             "taxa_juros_mensal": titulo["taxa_juros_mensal"],
                             "titulo_receber_id": titulo_id,
                             "origem_item": "TITULO",
+                            "parcial": int(valor_item) < valor_documento,
                         }
                     )
-                    total_rateado += valor_item
+                    total_rateado += int(valor_item)
 
-            # 2) Lançamentos manuais para competências que ainda não possuem título.
+            # 2) Lançamentos manuais/históricos para competências que ainda
+            # não possuem documento aberto. O valor pode ser integral ou parcial.
+            # Quando parcial, o sistema cria o documento original e, em seguida,
+            # um SALDO_JUROS vinculado para o restante.
             if cliente is not None and data_pagamento is not None:
                 loans_by_id = {int(row["id"]): row for row in emprestimos}
 
@@ -3109,6 +3512,7 @@ def register_routes(app: Flask) -> None:
                            AND tipo = 'JUROS'
                            AND competencia = ?
                            AND status IN ('PREVISTO', 'VENCIDO')
+                         ORDER BY sequencia DESC, id DESC
                          LIMIT 1
                         """,
                         par,
@@ -3119,29 +3523,24 @@ def register_routes(app: Flask) -> None:
                             f"Existe o título em aberto #{titulo_aberto['id']} para o "
                             f"empréstimo #{emprestimo_id} / "
                             f"{format_competencia_br(competencia)}. "
-                            "Selecione esse título na seção 'Títulos em aberto' "
-                            "em vez de criar outro lançamento."
+                            "Selecione esse título na seção 'Títulos em aberto'."
                         )
                         continue
 
-                    duplicate = db.execute(
-                        """
-                        SELECT id
-                          FROM movimentacoes_emprestimo
-                         WHERE emprestimo_id = ?
-                           AND tipo = 'JUROS'
-                           AND competencia = ?
-                         LIMIT 1
-                        """,
-                        par,
-                    ).fetchone()
-
-                    if duplicate is not None:
-                        errors.append(
-                            f"O empréstimo #{emprestimo_id} já possui juros recebidos "
-                            f"para {format_competencia_br(competencia)}."
-                        )
-                        continue
+                    # Se já houve recebimentos na competência sem saldo em aberto,
+                    # consideramos a obrigação encerrada e evitamos novo manual.
+                    recebido_competencia = int(
+                        db.execute(
+                            """
+                            SELECT COALESCE(SUM(valor_centavos), 0) AS total
+                              FROM movimentacoes_emprestimo
+                             WHERE emprestimo_id = ?
+                               AND tipo = 'JUROS'
+                               AND competencia = ?
+                            """,
+                            par,
+                        ).fetchone()["total"]
+                    )
 
                     try:
                         saldo_base = saldo_principal_antes_da_data(
@@ -3165,15 +3564,46 @@ def register_routes(app: Flask) -> None:
                         loan["taxa_juros_mensal"],
                     )
 
-                    if valor_item != juros_esperado:
+                    if recebido_competencia >= juros_esperado:
                         errors.append(
-                            f"Empréstimo #{emprestimo_id}: o juro integral para "
-                            f"o saldo de {format_money(saldo_base)} e taxa de "
-                            f"{format_percent(loan['taxa_juros_mensal'])} é "
-                            f"{format_money(juros_esperado)}, não "
-                            f"{format_money(valor_item)}."
+                            f"O empréstimo #{emprestimo_id} já possui "
+                            f"{format_money(recebido_competencia)} de juros recebidos "
+                            f"para {format_competencia_br(competencia)}."
                         )
                         continue
+
+                    saldo_obrigacao = juros_esperado - recebido_competencia
+                    if valor_item > saldo_obrigacao:
+                        errors.append(
+                            f"Empréstimo #{emprestimo_id}: o saldo de juros da competência "
+                            f"é {format_money(saldo_obrigacao)}. O valor informado "
+                            f"({format_money(valor_item)}) é maior que o devido."
+                        )
+                        continue
+
+                    # Se já houve algum pagamento na competência mas não há título
+                    # em aberto, não inventamos nova cadeia silenciosamente.
+                    if recebido_competencia > 0:
+                        errors.append(
+                            f"O empréstimo #{emprestimo_id} já possui recebimento parcial "
+                            f"de {format_money(recebido_competencia)} em "
+                            f"{format_competencia_br(competencia)}, mas não há documento "
+                            "de saldo em aberto. Corrija a agenda antes de continuar."
+                        )
+                        continue
+
+                    due_day = int(
+                        loan["dia_vencimento"]
+                        or (
+                            date.fromisoformat(loan["data_primeiro_vencimento"]).day
+                            if loan["data_primeiro_vencimento"]
+                            else date.fromisoformat(loan["data_emprestimo"]).day
+                        )
+                    )
+                    vencimento_documento = due_date_for_competence(
+                        competencia,
+                        due_day,
+                    )
 
                     pares_usados.add(par)
                     itens.append(
@@ -3181,10 +3611,13 @@ def register_routes(app: Flask) -> None:
                             "emprestimo_id": emprestimo_id,
                             "competencia": competencia,
                             "valor_centavos": int(valor_item),
+                            "valor_integral_centavos": int(juros_esperado),
                             "saldo_base_centavos": int(saldo_base),
                             "taxa_juros_mensal": loan["taxa_juros_mensal"],
                             "titulo_receber_id": None,
                             "origem_item": "MANUAL",
+                            "parcial": int(valor_item) < int(juros_esperado),
+                            "data_vencimento": vencimento_documento,
                         }
                     )
                     total_rateado += int(valor_item)
@@ -3249,11 +3682,31 @@ def register_routes(app: Flask) -> None:
                     auditoria_itens: list[dict[str, Any]] = []
 
                     for item in itens:
+                        # Em um item manual parcial, criamos primeiro o documento
+                        # original de juros. A movimentação deste pagamento ficará
+                        # vinculada a ele e a baixa criará o SALDO_JUROS.
+                        if (
+                            item["titulo_receber_id"] is None
+                            and item["origem_item"] == "MANUAL"
+                            and item.get("parcial")
+                        ):
+                            item["titulo_receber_id"] = criar_titulo_manual_parcial(
+                                db,
+                                emprestimo_id=item["emprestimo_id"],
+                                competencia=item["competencia"],
+                                data_vencimento=item["data_vencimento"],
+                                valor_integral_centavos=item["valor_integral_centavos"],
+                                saldo_base_centavos=item["saldo_base_centavos"],
+                                taxa_juros_mensal=item["taxa_juros_mensal"],
+                            )
+
                         observacao_movimento = f"Pagamento integrado #{pagamento_id}"
                         if item["titulo_receber_id"] is not None:
                             observacao_movimento += (
                                 f" — Título a receber #{item['titulo_receber_id']}"
                             )
+                        if item.get("parcial"):
+                            observacao_movimento += " — RECEBIMENTO PARCIAL DE JUROS"
 
                         if normalize_optional(form["observacao"]):
                             observacao_movimento += (
@@ -3270,10 +3723,10 @@ def register_routes(app: Flask) -> None:
                                 conta_origem_id, conta_destino_id,
                                 origem_banco_snapshot, origem_pix_snapshot,
                                 destino_banco_snapshot, destino_pix_snapshot,
-                                pagamento_integrado_id
+                                pagamento_integrado_id, titulo_receber_id
                             ) VALUES (
                                 ?, 'JUROS', ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?, ?, ?
+                                ?, ?, ?, ?, ?, ?, ?, ?
                             )
                             """,
                             (
@@ -3292,6 +3745,7 @@ def register_routes(app: Flask) -> None:
                                 destino_banco,
                                 destino_pix,
                                 pagamento_id,
+                                item["titulo_receber_id"],
                             ),
                         )
                         movimento_id = int(cursor_mov.lastrowid)
@@ -3317,28 +3771,22 @@ def register_routes(app: Flask) -> None:
                             ),
                         )
 
+                        titulo_saldo_id = None
                         if item["titulo_receber_id"] is not None:
-                            db.execute(
-                                """
-                                UPDATE titulos_receber
-                                   SET status = 'RECEBIDO',
-                                       movimentacao_id = ?,
-                                       data_recebimento = ?,
-                                       updated_at = CURRENT_TIMESTAMP
-                                 WHERE id = ?
-                                   AND status IN ('PREVISTO', 'VENCIDO')
-                                """,
-                                (
-                                    movimento_id,
-                                    data_pagamento.isoformat(),
-                                    item["titulo_receber_id"],
-                                ),
+                            titulo_saldo_id = aplicar_recebimento_titulo(
+                                db,
+                                titulo_id=item["titulo_receber_id"],
+                                valor_recebido_centavos=item["valor_centavos"],
+                                movimentacao_id=movimento_id,
+                                data_recebimento=data_pagamento,
+                                observacao=observacao_movimento,
                             )
 
                         auditoria_itens.append(
                             {
                                 **item,
                                 "movimentacao_id": movimento_id,
+                                "titulo_saldo_id": titulo_saldo_id,
                             }
                         )
 
@@ -3431,9 +3879,16 @@ def register_routes(app: Flask) -> None:
             SELECT i.id, i.emprestimo_id, i.competencia,
                    i.valor_centavos, i.saldo_base_centavos,
                    i.movimentacao_id, i.titulo_receber_id, i.origem_item,
-                   e.taxa_juros_mensal, e.descricao
+                   e.taxa_juros_mensal, e.descricao,
+                   t.status AS titulo_status,
+                   t.valor_previsto_centavos AS titulo_valor_centavos,
+                   s.id AS titulo_saldo_id,
+                   s.valor_previsto_centavos AS titulo_saldo_centavos,
+                   s.status AS titulo_saldo_status
               FROM pagamentos_integrados_itens i
               JOIN emprestimos e ON e.id = i.emprestimo_id
+              LEFT JOIN titulos_receber t ON t.id = i.titulo_receber_id
+              LEFT JOIN titulos_receber s ON s.titulo_origem_id = t.id
              WHERE i.pagamento_integrado_id = ?
              ORDER BY i.id
             """,
@@ -3479,6 +3934,56 @@ def register_routes(app: Flask) -> None:
                     "Informe o motivo da exclusão com pelo menos 5 caracteres."
                 )
 
+            # Um pagamento antigo não pode ser removido se o saldo criado por
+            # ele já foi baixado em outro recebimento. Nesse caso o usuário deve
+            # desfazer primeiro o pagamento mais recente da cadeia.
+            title_actions: list[dict[str, Any]] = []
+            for item in itens:
+                titulo_id = item["titulo_receber_id"]
+                if titulo_id is None:
+                    continue
+
+                descendants = db.execute(
+                    """
+                    WITH RECURSIVE arvore(id, movimentacao_id, status, depth) AS (
+                        SELECT id, movimentacao_id, status, 1
+                          FROM titulos_receber
+                         WHERE titulo_origem_id = ?
+                        UNION ALL
+                        SELECT t.id, t.movimentacao_id, t.status, a.depth + 1
+                          FROM titulos_receber t
+                          JOIN arvore a ON t.titulo_origem_id = a.id
+                    )
+                    SELECT * FROM arvore ORDER BY depth DESC, id DESC
+                    """,
+                    (titulo_id,),
+                ).fetchall()
+
+                paid_descendant = next(
+                    (
+                        row
+                        for row in descendants
+                        if row["movimentacao_id"] is not None
+                        or row["status"] in {"PARCIAL", "RECEBIDO"}
+                    ),
+                    None,
+                )
+                if paid_descendant is not None:
+                    errors.append(
+                        f"O título #{titulo_id} gerou o saldo #{paid_descendant['id']}, "
+                        "que já possui recebimento posterior. Exclua primeiro o "
+                        "pagamento mais recente dessa cadeia."
+                    )
+                    continue
+
+                title_actions.append(
+                    {
+                        "titulo_id": int(titulo_id),
+                        "origem_item": item["origem_item"],
+                        "descendants": [int(row["id"]) for row in descendants],
+                    }
+                )
+
             if errors:
                 for error in errors:
                     flash(error, "danger")
@@ -3490,37 +3995,49 @@ def register_routes(app: Flask) -> None:
                 }
 
                 try:
-                    for item in itens:
-                        db.execute(
-                            """
-                            UPDATE titulos_receber
-                               SET status = CASE
-                                       WHEN data_vencimento < date('now')
-                                       THEN 'VENCIDO'
-                                       ELSE 'PREVISTO'
-                                   END,
-                                   movimentacao_id = NULL,
-                                   data_recebimento = NULL,
-                                   updated_at = CURRENT_TIMESTAMP
-                             WHERE movimentacao_id = ?
-                            """,
-                            (item["movimentacao_id"],),
-                        )
+                    # Remove primeiro as referências aos títulos e movimentos.
+                    db.execute(
+                        "DELETE FROM pagamentos_integrados_itens WHERE pagamento_integrado_id = ?",
+                        (pagamento_id,),
+                    )
+                    db.execute(
+                        "DELETE FROM movimentacoes_emprestimo WHERE pagamento_integrado_id = ?",
+                        (pagamento_id,),
+                    )
 
-                    db.execute(
-                        """
-                        DELETE FROM pagamentos_integrados_itens
-                         WHERE pagamento_integrado_id = ?
-                        """,
-                        (pagamento_id,),
-                    )
-                    db.execute(
-                        """
-                        DELETE FROM movimentacoes_emprestimo
-                         WHERE pagamento_integrado_id = ?
-                        """,
-                        (pagamento_id,),
-                    )
+                    for action in title_actions:
+                        for descendant_id in action["descendants"]:
+                            db.execute(
+                                "DELETE FROM titulos_receber WHERE id = ?",
+                                (descendant_id,),
+                            )
+
+                        if action["origem_item"] == "MANUAL":
+                            # Título sintético criado exclusivamente porque o
+                            # lançamento manual foi parcial.
+                            db.execute(
+                                "DELETE FROM titulos_receber WHERE id = ?",
+                                (action["titulo_id"],),
+                            )
+                        else:
+                            # O título já existia antes do pagamento: reabre.
+                            db.execute(
+                                """
+                                UPDATE titulos_receber
+                                   SET status = CASE
+                                           WHEN data_vencimento < date('now')
+                                           THEN 'VENCIDO'
+                                           ELSE 'PREVISTO'
+                                       END,
+                                       valor_recebido_centavos = 0,
+                                       movimentacao_id = NULL,
+                                       data_recebimento = NULL,
+                                       updated_at = CURRENT_TIMESTAMP
+                                 WHERE id = ?
+                                """,
+                                (action["titulo_id"],),
+                            )
+
                     db.execute(
                         "DELETE FROM pagamentos_integrados WHERE id = ?",
                         (pagamento_id,),
@@ -3538,7 +4055,6 @@ def register_routes(app: Flask) -> None:
                             default=str,
                         ),
                     )
-
                     db.commit()
 
                 except sqlite3.DatabaseError as exc:
@@ -3551,7 +4067,8 @@ def register_routes(app: Flask) -> None:
                 else:
                     flash(
                         f"Pagamento integrado #{pagamento_id} excluído. "
-                        "Os lançamentos de juros vinculados também foram removidos.",
+                        "Os lançamentos e eventuais saldos parciais criados por ele "
+                        "também foram revertidos.",
                         "success",
                     )
                     return redirect(url_for("pagamentos_integrados_lista"))
@@ -3623,7 +4140,7 @@ def register_routes(app: Flask) -> None:
                     errors.append("Informe uma competência válida para os juros.")
                 elif competencia < emprestimo["data_emprestimo"][:7]:
                     errors.append("A competência não pode ser anterior ao mês do empréstimo.")
-                else:
+                elif competencia != movimento["competencia"]:
                     duplicate = get_db().execute(
                         """
                         SELECT id
@@ -3788,6 +4305,59 @@ def register_routes(app: Flask) -> None:
                 db = get_db()
                 before = movimentacao_para_auditoria(movimento)
                 try:
+                    if movimento["tipo"] == "JUROS" and movimento["titulo_receber_id"] is not None:
+                        titulo_id = int(movimento["titulo_receber_id"])
+                        descendants = db.execute(
+                            """
+                            WITH RECURSIVE arvore(id, movimentacao_id, status, depth) AS (
+                                SELECT id, movimentacao_id, status, 1
+                                  FROM titulos_receber
+                                 WHERE titulo_origem_id = ?
+                                UNION ALL
+                                SELECT t.id, t.movimentacao_id, t.status, a.depth + 1
+                                  FROM titulos_receber t
+                                  JOIN arvore a ON t.titulo_origem_id = a.id
+                            )
+                            SELECT * FROM arvore ORDER BY depth DESC, id DESC
+                            """,
+                            (titulo_id,),
+                        ).fetchall()
+                        paid_descendant = next(
+                            (
+                                row for row in descendants
+                                if row["movimentacao_id"] is not None
+                                or row["status"] in {"PARCIAL", "RECEBIDO"}
+                            ),
+                            None,
+                        )
+                        if paid_descendant is not None:
+                            raise ValueError(
+                                f"O título #{titulo_id} possui o saldo #{paid_descendant['id']} "
+                                "com recebimento posterior. Exclua primeiro a movimentação mais recente da cadeia."
+                            )
+
+                        for child in descendants:
+                            db.execute(
+                                "DELETE FROM titulos_receber WHERE id = ?",
+                                (child["id"],),
+                            )
+
+                        db.execute(
+                            """
+                            UPDATE titulos_receber
+                               SET status = CASE
+                                       WHEN data_vencimento < date('now') THEN 'VENCIDO'
+                                       ELSE 'PREVISTO'
+                                   END,
+                                   valor_recebido_centavos = 0,
+                                   movimentacao_id = NULL,
+                                   data_recebimento = NULL,
+                                   updated_at = CURRENT_TIMESTAMP
+                             WHERE id = ?
+                            """,
+                            (titulo_id,),
+                        )
+
                     db.execute("DELETE FROM movimentacoes_emprestimo WHERE id = ?", (movimentacao_id,))
 
                     if movimento["tipo"] in {"ABATIMENTO", "QUITACAO"}:
@@ -3846,6 +4416,7 @@ def register_routes(app: Flask) -> None:
         sql = """
             SELECT m.id, m.tipo, m.data_movimento, m.valor_centavos,
                    m.observacao, m.competencia, m.pagamento_integrado_id,
+                   m.titulo_receber_id,
                    m.saldo_antes_centavos, m.saldo_depois_centavos,
                    e.id AS emprestimo_id, c.id AS cliente_id, c.nome AS cliente_nome,
                    u.nome AS usuario_nome,
@@ -3940,9 +4511,10 @@ def register_routes(app: Flask) -> None:
 
         sql = """
             SELECT t.id, t.tipo, t.competencia, t.data_vencimento,
-                   t.valor_previsto_centavos, t.saldo_base_centavos,
-                   t.taxa_juros_mensal, t.status, t.observacao,
-                   t.data_recebimento, t.movimentacao_id,
+                   t.valor_previsto_centavos, t.valor_recebido_centavos,
+                   t.saldo_base_centavos, t.taxa_juros_mensal, t.status,
+                   t.observacao, t.data_recebimento, t.movimentacao_id,
+                   t.titulo_origem_id, t.natureza, t.sequencia,
                    e.id AS emprestimo_id,
                    e.saldo_atual_centavos,
                    c.id AS cliente_id,
@@ -3956,7 +4528,7 @@ def register_routes(app: Flask) -> None:
 
         if status == "abertos":
             sql += " AND t.status IN ('PREVISTO', 'VENCIDO')"
-        elif status in {"previsto", "vencido", "recebido", "cancelado"}:
+        elif status in {"previsto", "vencido", "parcial", "recebido", "cancelado"}:
             sql += " AND t.status = ?"
             params.append(status.upper())
 
@@ -3996,8 +4568,9 @@ def register_routes(app: Flask) -> None:
                 CASE
                     WHEN t.status = 'VENCIDO' THEN 0
                     WHEN t.status = 'PREVISTO' THEN 1
-                    WHEN t.status = 'RECEBIDO' THEN 2
-                    ELSE 3
+                    WHEN t.status = 'PARCIAL' THEN 2
+                    WHEN t.status = 'RECEBIDO' THEN 3
+                    ELSE 4
                 END,
                 t.data_vencimento,
                 c.nome COLLATE NOCASE
@@ -4029,31 +4602,20 @@ def register_routes(app: Flask) -> None:
     def titulos_receber_detalhe(titulo_id: int):
         db = get_db()
         sync_receivable_titles(db)
-
-        titulo = db.execute(
-            """
-            SELECT t.*,
-                   e.cliente_id,
-                   e.data_emprestimo,
-                   e.saldo_atual_centavos,
-                   e.status AS emprestimo_status,
-                   c.nome AS cliente_nome
-              FROM titulos_receber t
-              JOIN emprestimos e ON e.id = t.emprestimo_id
-              JOIN clientes c ON c.id = e.cliente_id
-             WHERE t.id = ?
-            """,
-            (titulo_id,),
-        ).fetchone()
-
-        if titulo is None:
-            abort(404)
+        titulo = get_titulo_receber_or_404(titulo_id)
 
         contas_cliente = get_client_accounts(titulo["cliente_id"])
         contas_proprias = get_own_accounts()
 
         form = {
-            "data_recebimento": request.form.get("data_recebimento", date.today().isoformat()),
+            "data_recebimento": request.form.get(
+                "data_recebimento",
+                date.today().isoformat(),
+            ),
+            "valor_recebido": request.form.get(
+                "valor_recebido",
+                format_money(titulo["valor_previsto_centavos"]).replace("R$ ", ""),
+            ),
             "conta_origem_id": (
                 parse_int(request.form.get("conta_origem_id"))
                 if request.method == "POST"
@@ -4068,62 +4630,55 @@ def register_routes(app: Flask) -> None:
         }
 
         if request.method == "POST":
-            if titulo["status"] == "RECEBIDO":
-                flash("Este título já está marcado como recebido.", "warning")
-                return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
-            if titulo["status"] == "CANCELADO":
-                flash("Este título está cancelado e não pode ser recebido.", "warning")
+            if titulo["status"] not in {"PREVISTO", "VENCIDO"}:
+                flash("Este título não está mais em aberto.", "warning")
                 return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
 
             data_recebimento = parse_iso_date(form["data_recebimento"])
+            valor_recebido = parse_money_to_centavos(form["valor_recebido"])
             errors: list[str] = []
+
             if data_recebimento is None:
                 errors.append("Informe uma data válida para o recebimento.")
             elif data_recebimento < date.fromisoformat(titulo["data_emprestimo"]):
                 errors.append("A data do recebimento não pode ser anterior ao empréstimo.")
 
-            errors.extend(validate_money_flow_accounts(
-                titulo["cliente_id"],
-                form["conta_origem_id"],
-                form["conta_destino_id"],
-                is_loan_disbursement=False,
-            ))
+            valor_documento = int(titulo["valor_previsto_centavos"])
+            if valor_recebido is None or valor_recebido <= 0:
+                errors.append("Informe o valor efetivamente recebido.")
+            elif valor_recebido > valor_documento:
+                errors.append(
+                    f"O valor recebido não pode superar o saldo do documento "
+                    f"({format_money(valor_documento)})."
+                )
+
+            errors.extend(
+                validate_money_flow_accounts(
+                    titulo["cliente_id"],
+                    form["conta_origem_id"],
+                    form["conta_destino_id"],
+                    is_loan_disbursement=False,
+                )
+            )
 
             if errors:
                 for error in errors:
                     flash(error, "danger")
             else:
-                duplicate = db.execute(
-                    """
-                    SELECT id, data_movimento
-                      FROM movimentacoes_emprestimo
-                     WHERE emprestimo_id = ?
-                       AND tipo = 'JUROS'
-                       AND competencia = ?
-                     LIMIT 1
-                    """,
-                    (titulo["emprestimo_id"], titulo["competencia"]),
-                ).fetchone()
-
-                if duplicate is not None:
-                    db.execute(
-                        """
-                        UPDATE titulos_receber
-                           SET status = 'RECEBIDO', movimentacao_id = ?,
-                               data_recebimento = ?, updated_at = CURRENT_TIMESTAMP
-                         WHERE id = ?
-                        """,
-                        (duplicate["id"], duplicate["data_movimento"], titulo_id),
-                    )
-                    db.commit()
-                    flash("Já existia uma movimentação de juros para esta competência; o título foi vinculado a ela.", "success")
-                    return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
-
                 origem_banco, origem_pix, destino_banco, destino_pix = get_account_snapshots(
-                    form["conta_origem_id"], form["conta_destino_id"]
+                    form["conta_origem_id"],
+                    form["conta_destino_id"],
                 )
 
                 try:
+                    parcial = int(valor_recebido) < valor_documento
+                    observacao_mov = normalize_optional(form["observacao"])
+                    if parcial:
+                        base = "RECEBIMENTO PARCIAL DE JUROS"
+                        observacao_mov = (
+                            f"{base} — {observacao_mov}" if observacao_mov else base
+                        )
+
                     cursor = db.execute(
                         """
                         INSERT INTO movimentacoes_emprestimo (
@@ -4132,62 +4687,98 @@ def register_routes(app: Flask) -> None:
                             saldo_antes_centavos, saldo_depois_centavos,
                             conta_origem_id, conta_destino_id,
                             origem_banco_snapshot, origem_pix_snapshot,
-                            destino_banco_snapshot, destino_pix_snapshot
-                        ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            destino_banco_snapshot, destino_pix_snapshot,
+                            titulo_receber_id
+                        ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            titulo["emprestimo_id"], data_recebimento.isoformat(),
-                            titulo["valor_previsto_centavos"], normalize_optional(form["observacao"]),
-                            titulo["competencia"], g.usuario["id"],
-                            titulo["saldo_base_centavos"], titulo["saldo_base_centavos"],
-                            form["conta_origem_id"], form["conta_destino_id"],
-                            origem_banco, origem_pix, destino_banco, destino_pix,
+                            titulo["emprestimo_id"],
+                            data_recebimento.isoformat(),
+                            valor_recebido,
+                            observacao_mov,
+                            titulo["competencia"],
+                            g.usuario["id"],
+                            titulo["saldo_base_centavos"],
+                            titulo["saldo_base_centavos"],
+                            form["conta_origem_id"],
+                            form["conta_destino_id"],
+                            origem_banco,
+                            origem_pix,
+                            destino_banco,
+                            destino_pix,
+                            titulo_id,
                         ),
                     )
                     movement_id = int(cursor.lastrowid)
 
-                    db.execute(
-                        """
-                        UPDATE titulos_receber
-                           SET status = 'RECEBIDO', movimentacao_id = ?,
-                               data_recebimento = ?, observacao = ?,
-                               updated_at = CURRENT_TIMESTAMP
-                         WHERE id = ?
-                        """,
-                        (movement_id, data_recebimento.isoformat(), normalize_optional(form["observacao"]), titulo_id),
+                    saldo_id = aplicar_recebimento_titulo(
+                        db,
+                        titulo_id=titulo_id,
+                        valor_recebido_centavos=int(valor_recebido),
+                        movimentacao_id=movement_id,
+                        data_recebimento=data_recebimento,
+                        observacao=observacao_mov,
                     )
+
                     registrar_auditoria(
-                        db, "titulo_receber", titulo_id, "RECEBIDO",
-                        json.dumps({
-                            "tipo": "JUROS",
-                            "competencia": titulo["competencia"],
-                            "valor_centavos": titulo["valor_previsto_centavos"],
-                            "movimentacao_id": movement_id,
-                        }, ensure_ascii=False),
+                        db,
+                        "titulo_receber",
+                        titulo_id,
+                        "RECEBIMENTO_PARCIAL" if saldo_id else "RECEBIDO",
+                        json.dumps(
+                            {
+                                "valor_recebido_centavos": int(valor_recebido),
+                                "movimentacao_id": movement_id,
+                                "titulo_saldo_id": saldo_id,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
                     )
                     db.commit()
-                except sqlite3.IntegrityError:
+                except (sqlite3.DatabaseError, ValueError) as exc:
                     db.rollback()
-                    flash("Os juros desta competência já foram registrados.", "warning")
+                    app.logger.exception("Erro ao confirmar título a receber")
+                    flash(f"O recebimento não foi gravado: {exc}", "danger")
                 else:
-                    flash(f"Recebimento de {format_money(titulo['valor_previsto_centavos'])} confirmado.", "success")
+                    if saldo_id:
+                        flash(
+                            f"Recebimento parcial de {format_money(valor_recebido)} registrado. "
+                            f"O saldo restante foi gerado no título #{saldo_id}.",
+                            "success",
+                        )
+                        return redirect(url_for("titulos_receber_detalhe", titulo_id=saldo_id))
+
+                    flash(
+                        f"Recebimento de {format_money(valor_recebido)} confirmado.",
+                        "success",
+                    )
                     return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
 
-        titulo = db.execute(
+        titulo = get_titulo_receber_or_404(titulo_id)
+        titulo_origem = None
+        if titulo["titulo_origem_id"] is not None:
+            titulo_origem = db.execute(
+                "SELECT id, status, valor_previsto_centavos FROM titulos_receber WHERE id = ?",
+                (titulo["titulo_origem_id"],),
+            ).fetchone()
+
+        titulos_saldo = db.execute(
             """
-            SELECT t.*, e.cliente_id, e.saldo_atual_centavos,
-                   e.status AS emprestimo_status, c.nome AS cliente_nome
-              FROM titulos_receber t
-              JOIN emprestimos e ON e.id = t.emprestimo_id
-              JOIN clientes c ON c.id = e.cliente_id
-             WHERE t.id = ?
+            SELECT id, status, valor_previsto_centavos, valor_recebido_centavos,
+                   data_vencimento, sequencia
+              FROM titulos_receber
+             WHERE titulo_origem_id = ?
+             ORDER BY sequencia, id
             """,
             (titulo_id,),
-        ).fetchone()
+        ).fetchall()
 
         return render_template(
             "receber/detalhe.html",
             titulo=titulo,
+            titulo_origem=titulo_origem,
+            titulos_saldo=titulos_saldo,
             contas_cliente=contas_cliente,
             contas_proprias=contas_proprias,
             form=form,
@@ -4259,6 +4850,19 @@ def register_routes(app: Flask) -> None:
             if data_vencimento is None:
                 errors.append("Informe uma data de vencimento válida.")
 
+            if titulo["natureza"] == "SALDO_JUROS":
+                if competencia is not None and competencia != titulo["competencia"]:
+                    errors.append(
+                        "Um saldo de juros deve manter a mesma competência do documento de origem."
+                    )
+                if (
+                    data_vencimento is not None
+                    and data_vencimento.isoformat() != titulo["data_vencimento"]
+                ):
+                    errors.append(
+                        "Um saldo de juros deve manter o mesmo vencimento do documento de origem."
+                    )
+
             if valor_previsto is None or valor_previsto <= 0:
                 errors.append("Informe um valor previsto válido.")
 
@@ -4288,6 +4892,7 @@ def register_routes(app: Flask) -> None:
                        AND tipo = 'JUROS'
                        AND competencia = ?
                        AND id <> ?
+                       AND status IN ('PREVISTO', 'VENCIDO')
                      LIMIT 1
                     """,
                     (
@@ -4303,26 +4908,24 @@ def register_routes(app: Flask) -> None:
                         f"{format_competencia_br(competencia)}."
                     )
 
-                conflito_movimento = db.execute(
-                    """
-                    SELECT id
-                      FROM movimentacoes_emprestimo
-                     WHERE emprestimo_id = ?
-                       AND tipo = 'JUROS'
-                       AND competencia = ?
-                     LIMIT 1
-                    """,
-                    (
-                        titulo["emprestimo_id"],
-                        competencia,
-                    ),
-                ).fetchone()
+                if competencia != titulo["competencia"]:
+                    conflito_movimento = db.execute(
+                        """
+                        SELECT id
+                          FROM movimentacoes_emprestimo
+                         WHERE emprestimo_id = ?
+                           AND tipo = 'JUROS'
+                           AND competencia = ?
+                         LIMIT 1
+                        """,
+                        (titulo["emprestimo_id"], competencia),
+                    ).fetchone()
 
-                if conflito_movimento is not None:
-                    errors.append(
-                        f"Já existe uma movimentação de juros para "
-                        f"{format_competencia_br(competencia)}."
-                    )
+                    if conflito_movimento is not None:
+                        errors.append(
+                            f"Já existe uma movimentação de juros para "
+                            f"{format_competencia_br(competencia)}."
+                        )
 
             saldo_base = None
             juros_esperado = None
@@ -4346,13 +4949,14 @@ def register_routes(app: Flask) -> None:
                     )
 
                     if (
-                        valor_previsto is not None
+                        titulo["natureza"] != "SALDO_JUROS"
+                        and valor_previsto is not None
                         and valor_previsto != juros_esperado
                     ):
                         errors.append(
                             "O juro continua sendo integral. Para o saldo-base "
                             f"de {format_money(saldo_base)} e taxa de "
-                            f"{format_percent(titulo['taxa_atual'])}, o valor "
+                            f"{format_percent_br(titulo['taxa_atual'])}, o valor "
                             f"correto é {format_money(juros_esperado)}."
                         )
 
@@ -4387,8 +4991,8 @@ def register_routes(app: Flask) -> None:
                             competencia,
                             data_vencimento.isoformat(),
                             valor_previsto,
-                            saldo_base,
-                            titulo["taxa_atual"],
+                            (titulo["saldo_base_centavos"] if titulo["natureza"] == "SALDO_JUROS" else saldo_base),
+                            titulo["taxa_juros_mensal"],
                             novo_status,
                             normalize_optional(form["observacao"]),
                             titulo_id,
@@ -4401,12 +5005,23 @@ def register_routes(app: Flask) -> None:
                         # que acabou de ser corrigido.
                         db.execute(
                             """
-                            INSERT OR IGNORE INTO titulos_receber (
+                            INSERT INTO titulos_receber (
                                 emprestimo_id, tipo, competencia,
                                 data_vencimento, valor_previsto_centavos,
+                                valor_recebido_centavos,
                                 saldo_base_centavos, taxa_juros_mensal,
-                                status, observacao, ajuste_manual
-                            ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, 'CANCELADO', ?, 1)
+                                status, observacao, ajuste_manual,
+                                natureza, sequencia
+                            )
+                            SELECT ?, 'JUROS', ?, ?, ?, 0, ?, ?, 'CANCELADO', ?, 1, 'JUROS', 1
+                             WHERE NOT EXISTS (
+                                 SELECT 1
+                                   FROM titulos_receber
+                                  WHERE emprestimo_id = ?
+                                    AND tipo = 'JUROS'
+                                    AND competencia = ?
+                                    AND status = 'CANCELADO'
+                             )
                             """,
                             (
                                 titulo["emprestimo_id"],
@@ -4419,6 +5034,8 @@ def register_routes(app: Flask) -> None:
                                     f"Competência substituída pelo título #{titulo_id} "
                                     f"em {format_competencia_br(competencia)}."
                                 ),
+                                titulo["emprestimo_id"],
+                                titulo["competencia"],
                             ),
                         )
 

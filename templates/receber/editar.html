@@ -15,18 +15,24 @@
 
         <label>
             Competência
-            <input type="month" name="competencia" value="{{ form['competencia'] }}" required>
+            <input type="month" name="competencia" value="{{ form['competencia'] }}" required {{ 'readonly' if titulo['natureza'] == 'SALDO_JUROS' }}>
         </label>
 
         <label>
             Vencimento
-            <input type="date" name="data_vencimento" value="{{ form['data_vencimento'] }}" required>
+            <input type="date" name="data_vencimento" value="{{ form['data_vencimento'] }}" required {{ 'readonly' if titulo['natureza'] == 'SALDO_JUROS' }}>
         </label>
 
         <label>
             Juros previstos
             <input type="text" name="valor_previsto" value="{{ form['valor_previsto'] }}" inputmode="decimal" required>
-            <small class="field-help">O sistema validará o valor integral conforme saldo-base e taxa.</small>
+            <small class="field-help">
+                {% if titulo['natureza'] == 'SALDO_JUROS' %}
+                    Este documento representa somente o saldo remanescente de um recebimento parcial.
+                {% else %}
+                    O sistema validará o valor integral conforme saldo-base e taxa.
+                {% endif %}
+            </small>
         </label>
 
         <label>

@@ -4,7 +4,10 @@
 <div class="page-header">
     <div>
         <h1>Título a receber #{{ titulo['id'] }}</h1>
-        <p class="muted">Juros · Empréstimo #{{ titulo['emprestimo_id'] }} · {{ titulo['cliente_nome'] }}</p>
+        <p class="muted">
+            {% if titulo['natureza'] == 'SALDO_JUROS' %}Saldo de juros{% else %}Juros{% endif %}
+            · Empréstimo #{{ titulo['emprestimo_id'] }} · {{ titulo['cliente_nome'] }}
+        </p>
     </div>
     <div class="actions wrap-actions">
         {% if titulo['status'] in ['PREVISTO', 'VENCIDO'] %}
@@ -15,36 +18,134 @@
         <a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Voltar à agenda</a>
     </div>
 </div>
+
 <div class="financial-operation-grid">
 <section class="card section-card">
-    <h2>Previsão</h2>
+    <h2>Documento</h2>
     <dl class="details">
-        <dt>Status</dt><dd><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></dd>
+        <dt>Status</dt>
+        <dd><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></dd>
+
+        <dt>Natureza</dt>
+        <dd>{{ 'SALDO DE JUROS' if titulo['natureza'] == 'SALDO_JUROS' else 'JUROS' }}</dd>
+
+        {% if titulo['titulo_origem_id'] %}
+        <dt>Originado do título</dt>
+        <dd><a href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['titulo_origem_id']) }}">#{{ titulo['titulo_origem_id'] }}</a></dd>
+        {% endif %}
+
+        <dt>Sequência</dt><dd>{{ titulo['sequencia'] }}</dd>
         <dt>Competência</dt><dd>{{ titulo['competencia']|competencia_br }}</dd>
         <dt>Vencimento</dt><dd>{{ titulo['data_vencimento']|date_br }}</dd>
         <dt>Saldo base</dt><dd>{{ titulo['saldo_base_centavos']|money }}</dd>
         <dt>Taxa</dt><dd>{{ titulo['taxa_juros_mensal']|percent_br }}</dd>
-        <dt>Juros integrais previstos</dt><dd><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></dd>
-        {% if titulo['data_recebimento'] %}<dt>Recebido em</dt><dd>{{ titulo['data_recebimento']|date_br }}</dd>{% endif %}
-        {% if titulo['movimentacao_id'] %}<dt>Movimentação</dt><dd><a href="{{ url_for('movimentacoes_editar', movimentacao_id=titulo['movimentacao_id']) }}">#{{ titulo['movimentacao_id'] }}</a></dd>{% endif %}
+        <dt>Valor do documento</dt><dd><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></dd>
+
+        {% if titulo['valor_recebido_centavos'] %}
+        <dt>Recebido neste documento</dt><dd><strong>{{ titulo['valor_recebido_centavos']|money }}</strong></dd>
+        {% endif %}
+
+        {% if titulo['data_recebimento'] %}
+        <dt>Recebido em</dt><dd>{{ titulo['data_recebimento']|date_br }}</dd>
+        {% endif %}
+
+        {% if titulo['movimentacao_id'] %}
+        <dt>Movimentação</dt>
+        <dd><a href="{{ url_for('movimentacoes_editar', movimentacao_id=titulo['movimentacao_id']) }}">#{{ titulo['movimentacao_id'] }}</a></dd>
+        {% endif %}
     </dl>
-    <div class="calculation-box"><span>Este título é uma previsão, não uma movimentação financeira.</span><strong>{{ titulo['valor_previsto_centavos']|money }}</strong><small>A movimentação de JUROS só é criada quando o recebimento é confirmado.</small></div>
+
+    {% if titulo['status'] == 'PARCIAL' %}
+    <div class="info-box partial-receipt-box">
+        <strong>Recebimento parcial</strong>
+        <p>
+            Foram recebidos {{ titulo['valor_recebido_centavos']|money }} de
+            {{ titulo['valor_previsto_centavos']|money }}. O saldo foi transferido
+            para um novo documento relacionado abaixo.
+        </p>
+    </div>
+    {% endif %}
+
+    {% if titulos_saldo %}
+    <div class="related-title-list">
+        <h3>Documentos de saldo gerados</h3>
+        {% for saldo in titulos_saldo %}
+            <a class="related-title-card" href="{{ url_for('titulos_receber_detalhe', titulo_id=saldo['id']) }}">
+                <span>#{{ saldo['id'] }} · sequência {{ saldo['sequencia'] }}</span>
+                <strong>{{ saldo['valor_previsto_centavos']|money }}</strong>
+                <span class="badge badge-{{ saldo['status']|lower }}">{{ saldo['status'] }}</span>
+            </a>
+        {% endfor %}
+    </div>
+    {% endif %}
 </section>
+
 <section class="card section-card">
 {% if titulo['status'] in ['PREVISTO', 'VENCIDO'] %}
     <h2>Confirmar recebimento</h2>
+    <p class="muted">
+        Você pode receber o documento inteiro ou informar apenas o valor efetivamente pago.
+        Se for menor, o sistema cria automaticamente um novo documento com o saldo restante,
+        mantendo a mesma competência e vencimento.
+    </p>
+
     <form method="post" class="form-grid">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <label>Data do recebimento<input type="date" name="data_recebimento" value="{{ form['data_recebimento'] }}" required></label>
-        <label>Valor<input type="text" value="{{ titulo['valor_previsto_centavos']|money }}" readonly><small class="field-help">Juros integral. O valor não pode ser fracionado.</small></label>
+
+        <label>
+            Data do recebimento
+            <input type="date" name="data_recebimento" value="{{ form['data_recebimento'] }}" required>
+        </label>
+
+        <label>
+            Valor recebido agora
+            <input type="text" name="valor_recebido" value="{{ form['valor_recebido'] }}" inputmode="decimal" required>
+            <small class="field-help">Saldo deste documento: {{ titulo['valor_previsto_centavos']|money }}</small>
+        </label>
+
         <h3 class="field-span-2 form-section-title">Origem e destino</h3>
-        <label>Saiu da conta do cliente<select name="conta_origem_id" required><option value="">Selecione...</option>{% for conta in contas_cliente %}<option value="{{ conta['id'] }}" {{ 'selected' if form['conta_origem_id'] == conta['id'] }}>{{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}</option>{% endfor %}</select></label>
-        <label>Você recebeu em qual conta?<select name="conta_destino_id" required><option value="">Selecione...</option>{% for conta in contas_proprias %}<option value="{{ conta['id'] }}" {{ 'selected' if form['conta_destino_id'] == conta['id'] }}>{{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}</option>{% endfor %}</select></label>
-        <label class="field-span-2">Observação<textarea name="observacao" rows="4" maxlength="500" placeholder="Opcional">{{ form['observacao'] }}</textarea></label>
-        <div class="form-actions field-span-2"><a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Cancelar</a><button class="button" type="submit">Confirmar que recebi</button></div>
+
+        <label>
+            Saiu da conta do cliente
+            <select name="conta_origem_id" required>
+                <option value="">Selecione...</option>
+                {% for conta in contas_cliente %}
+                <option value="{{ conta['id'] }}" {{ 'selected' if form['conta_origem_id'] == conta['id'] }}>
+                    {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Você recebeu em qual conta?
+            <select name="conta_destino_id" required>
+                <option value="">Selecione...</option>
+                {% for conta in contas_proprias %}
+                <option value="{{ conta['id'] }}" {{ 'selected' if form['conta_destino_id'] == conta['id'] }}>
+                    {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field-span-2">
+            Observação
+            <textarea name="observacao" rows="4" maxlength="500" placeholder="Opcional">{{ form['observacao'] }}</textarea>
+        </label>
+
+        <div class="form-actions field-span-2">
+            <a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Cancelar</a>
+            <button class="button" type="submit">Confirmar recebimento</button>
+        </div>
     </form>
-{% elif titulo['status'] == 'RECEBIDO' %}<div class="empty-state">Este título já foi recebido e está vinculado à movimentação financeira.</div>
-{% else %}<div class="empty-state">Este título foi cancelado e não aceita confirmação de recebimento.</div>{% endif %}
+{% elif titulo['status'] == 'PARCIAL' %}
+    <div class="empty-state">Este documento já teve um recebimento parcial. Use o documento de saldo relacionado para registrar o restante.</div>
+{% elif titulo['status'] == 'RECEBIDO' %}
+    <div class="empty-state">Este documento já foi recebido e está vinculado à movimentação financeira.</div>
+{% else %}
+    <div class="empty-state">Este título foi cancelado e não aceita confirmação de recebimento.</div>
+{% endif %}
 </section>
 </div>
 {% endblock %}

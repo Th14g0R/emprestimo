@@ -54,6 +54,12 @@
                         <a href="{{ url_for('titulos_receber_detalhe', titulo_id=item['titulo_receber_id']) }}">
                             Título #{{ item['titulo_receber_id'] }}
                         </a>
+                        {% if item['titulo_status'] == 'PARCIAL' %}
+                            <br><span class="badge badge-parcial">PARCIAL</span>
+                        {% endif %}
+                        {% if item['titulo_saldo_id'] %}
+                            <br><small>Saldo gerado: <a href="{{ url_for('titulos_receber_detalhe', titulo_id=item['titulo_saldo_id']) }}">#{{ item['titulo_saldo_id'] }} · {{ item['titulo_saldo_centavos']|money }}</a></small>
+                        {% endif %}
                     {% else %}
                         Manual
                     {% endif %}

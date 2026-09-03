@@ -33,6 +33,7 @@
             <option value="abertos" {{ 'selected' if status == 'abertos' }}>Em aberto</option>
             <option value="previsto" {{ 'selected' if status == 'previsto' }}>Previstos</option>
             <option value="vencido" {{ 'selected' if status == 'vencido' }}>Vencidos</option>
+            <option value="parcial" {{ 'selected' if status == 'parcial' }}>Parciais</option>
             <option value="recebido" {{ 'selected' if status == 'recebido' }}>Recebidos</option>
             <option value="cancelado" {{ 'selected' if status == 'cancelado' }}>Cancelados</option>
             <option value="todos" {{ 'selected' if status == 'todos' }}>Todos</option>
@@ -73,7 +74,8 @@
             <th>Vencimento</th>
             <th>Cliente / Empréstimo</th>
             <th>Competência</th>
-            <th class="text-right">Valor previsto</th>
+            <th>Documento</th>
+            <th class="text-right">Valor</th>
             <th>Status</th>
             <th>Recebido em</th>
             <th>Observação</th>
@@ -90,7 +92,20 @@
                 <small><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=titulo['emprestimo_id']) }}">Empréstimo #{{ titulo['emprestimo_id'] }}</a></small>
             </td>
             <td>{{ titulo['competencia']|competencia_br }}</td>
-            <td class="text-right nowrap"><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></td>
+            <td>
+                {% if titulo['natureza'] == 'SALDO_JUROS' %}
+                    <strong>Saldo de juros</strong>
+                    {% if titulo['titulo_origem_id'] %}<br><small>do título #{{ titulo['titulo_origem_id'] }}</small>{% endif %}
+                {% else %}
+                    Juros
+                {% endif %}
+            </td>
+            <td class="text-right nowrap">
+                <strong>{{ titulo['valor_previsto_centavos']|money }}</strong>
+                {% if titulo['status'] == 'PARCIAL' %}
+                    <br><small>recebido {{ titulo['valor_recebido_centavos']|money }}</small>
+                {% endif %}
+            </td>
             <td><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></td>
             <td class="nowrap">{{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}</td>
             <td>{{ titulo['observacao'] or '-' }}</td>
