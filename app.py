@@ -723,14 +723,31 @@ def format_money(value: int | None) -> str:
     return f"{sinal}R$ {reais_fmt},{cents:02d}"
 
 
-def format_date_br(value: str | None) -> str:
-    if not value:
+def format_date_br(value: Any) -> str:
+    """
+    Formata datas para dd/mm/aaaa.
+
+    O filtro é usado tanto com valores TEXT vindos do SQLite quanto com
+    objetos date/datetime criados pela aplicação (por exemplo, os períodos
+    da Agenda / A Receber).
+    """
+    if value is None or value == "":
+        return "-"
+
+    if isinstance(value, datetime):
+        return value.date().strftime("%d/%m/%Y")
+
+    if isinstance(value, date):
+        return value.strftime("%d/%m/%Y")
+
+    text = str(value).strip()
+    if not text:
         return "-"
 
     try:
-        return date.fromisoformat(value[:10]).strftime("%d/%m/%Y")
-    except ValueError:
-        return value
+        return date.fromisoformat(text[:10]).strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return text
 
 
 def format_percent_br(value: Any) -> str:
