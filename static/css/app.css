@@ -450,3 +450,228 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.35; }
         align-items: flex-start;
     }
 }
+
+
+/* V15 - filtros por período e tabelas financeiras mais legíveis */
+.nowrap { white-space: nowrap; }
+
+.filter-date-label {
+    display: grid;
+    grid-template-columns: auto minmax(135px, 1fr);
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #475467;
+}
+
+.filter-date-label span {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+
+.filter-help {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.filters-movements {
+    grid-template-columns:
+        minmax(260px, 1.5fr)
+        minmax(150px, .7fr)
+        minmax(190px, .8fr)
+        minmax(190px, .8fr)
+        auto
+        auto;
+    align-items: end;
+}
+
+.filters-receivables {
+    grid-template-columns:
+        minmax(260px, 1.4fr)
+        minmax(145px, .65fr)
+        minmax(160px, .7fr)
+        minmax(185px, .8fr)
+        minmax(185px, .8fr)
+        auto
+        auto;
+    align-items: end;
+}
+
+/* Movimentações: menos colunas e conteúdo agrupado */
+.movement-table-card .table-responsive {
+    overflow-x: auto;
+}
+
+.movements-table {
+    min-width: 1160px;
+    table-layout: auto;
+}
+
+.movements-table th,
+.movements-table td {
+    vertical-align: top;
+}
+
+.movements-table th:nth-child(1) { width: 88px; }
+.movements-table th:nth-child(2) { width: 170px; }
+.movements-table th:nth-child(3) { width: 118px; }
+.movements-table th:nth-child(4) { width: 115px; }
+.movements-table th:nth-child(5) { width: 155px; }
+.movements-table th:nth-child(6) { width: 220px; }
+.movements-table th:nth-child(7) { width: 185px; }
+.movements-table th:nth-child(8) { width: 120px; }
+
+.movement-subline {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+.movement-balance {
+    display: grid;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.movement-balance > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.movement-balance small,
+.movement-account small,
+.movement-details small {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+}
+
+.movement-flow {
+    display: grid;
+    gap: 4px;
+    min-width: 190px;
+}
+
+.movement-account {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.movement-account strong {
+    font-size: 13px;
+}
+
+.movement-pix {
+    display: block;
+    max-width: 195px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.movement-flow-arrow {
+    color: #94a3b8;
+    font-size: 12px;
+    line-height: 1;
+}
+
+.movement-details {
+    min-width: 150px;
+    overflow-wrap: anywhere;
+}
+
+.movement-note {
+    margin-top: 6px;
+    color: #475467;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.movement-actions .actions {
+    align-items: stretch;
+    flex-direction: column;
+}
+
+.movement-actions .button {
+    white-space: nowrap;
+}
+
+/* Agenda / A Receber */
+.receivables-table {
+    min-width: 1050px;
+}
+
+.receivables-table td {
+    vertical-align: top;
+}
+
+.compact-empty-state {
+    padding: 16px;
+}
+
+/* Pagamento integrado: títulos existentes + manual */
+.integrated-open-titles-table {
+    min-width: 900px;
+}
+
+.integrated-open-titles-table td,
+.integrated-payment-table td {
+    vertical-align: middle;
+}
+
+.integrated-title-check,
+.integrated-manual-check {
+    width: 20px !important;
+    height: 20px;
+}
+
+.integrated-closing-bar {
+    margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+    gap: 12px;
+}
+
+.integrated-closing-bar > div {
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f8fafc;
+    display: grid;
+    gap: 4px;
+}
+
+.integrated-closing-bar small {
+    color: var(--muted);
+}
+
+.integrated-closing-bar strong {
+    font-size: 18px;
+}
+
+@media (max-width: 1200px) {
+    .filters-movements,
+    .filters-receivables {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 720px) {
+    .filters-movements,
+    .filters-receivables,
+    .integrated-closing-bar {
+        grid-template-columns: 1fr;
+    }
+
+    .filter-date-label {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+}

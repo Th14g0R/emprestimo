@@ -2,8 +2,18 @@
 {% block title %}Título #{{ titulo['id'] }}{% endblock %}
 {% block content %}
 <div class="page-header">
-    <div><h1>Título a receber #{{ titulo['id'] }}</h1><p class="muted">Juros · Empréstimo #{{ titulo['emprestimo_id'] }} · {{ titulo['cliente_nome'] }}</p></div>
-    <a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Voltar à agenda</a>
+    <div>
+        <h1>Título a receber #{{ titulo['id'] }}</h1>
+        <p class="muted">Juros · Empréstimo #{{ titulo['emprestimo_id'] }} · {{ titulo['cliente_nome'] }}</p>
+    </div>
+    <div class="actions wrap-actions">
+        {% if titulo['status'] in ['PREVISTO', 'VENCIDO'] %}
+            <a class="button button-secondary" href="{{ url_for('pagamentos_integrados_novo', cliente_id=titulo['cliente_id']) }}">Usar em pagamento integrado</a>
+            <a class="button button-light" href="{{ url_for('titulos_receber_editar', titulo_id=titulo['id']) }}">Alterar</a>
+            <a class="button button-danger" href="{{ url_for('titulos_receber_excluir', titulo_id=titulo['id']) }}">Excluir</a>
+        {% endif %}
+        <a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Voltar à agenda</a>
+    </div>
 </div>
 <div class="financial-operation-grid">
 <section class="card section-card">

@@ -37,6 +37,7 @@
             <tr>
                 <th>Empréstimo</th>
                 <th>Competência</th>
+                <th>Origem</th>
                 <th>Saldo base</th>
                 <th>Taxa</th>
                 <th class="text-right">Juros</th>
@@ -48,6 +49,15 @@
             <tr>
                 <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=item['emprestimo_id']) }}">#{{ item['emprestimo_id'] }}</a></td>
                 <td>{{ item['competencia']|competencia_br }}</td>
+                <td>
+                    {% if item['titulo_receber_id'] %}
+                        <a href="{{ url_for('titulos_receber_detalhe', titulo_id=item['titulo_receber_id']) }}">
+                            Título #{{ item['titulo_receber_id'] }}
+                        </a>
+                    {% else %}
+                        Manual
+                    {% endif %}
+                </td>
                 <td>{{ item['saldo_base_centavos']|money }}</td>
                 <td>{{ item['taxa_juros_mensal']|percent_br }}</td>
                 <td class="text-right"><strong>{{ item['valor_centavos']|money }}</strong></td>

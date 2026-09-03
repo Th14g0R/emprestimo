@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Excluir título #{{ titulo['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Excluir título em aberto #{{ titulo['id'] }}</h1>
+        <p class="muted">{{ titulo['cliente_nome'] }} · Empréstimo #{{ titulo['emprestimo_id'] }}</p>
+    </div>
+</div>
+
+<section class="card section-card danger-zone-card">
+    <div class="alert alert-danger">
+        <strong>Atenção:</strong>
+        o título de {{ titulo['valor_previsto_centavos']|money }},
+        competência {{ titulo['competencia']|competencia_br }},
+        deixará de aparecer como recebimento em aberto.
+    </div>
+
+    <p class="muted">
+        Para preservar a rastreabilidade e impedir que a geração automática recrie a mesma previsão,
+        o registro será marcado internamente como CANCELADO e a exclusão ficará na auditoria.
+    </p>
+
+    <form method="post" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label>
+            Motivo da exclusão
+            <textarea name="motivo_exclusao" rows="4" minlength="5" required placeholder="Explique por que este título não deve mais ser cobrado"></textarea>
+        </label>
+
+        <label>
+            Confirme sua senha
+            <input type="password" name="senha_confirmacao" required autocomplete="current-password">
+        </label>
+
+        <div class="form-actions">
+            <a class="button button-light" href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['id']) }}">Cancelar</a>
+            <button class="button button-danger" type="submit">Excluir título</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

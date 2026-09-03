@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Alterar título #{{ titulo['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Alterar título em aberto #{{ titulo['id'] }}</h1>
+        <p class="muted">{{ titulo['cliente_nome'] }} · Empréstimo #{{ titulo['emprestimo_id'] }}</p>
+    </div>
+    <a class="button button-light" href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['id']) }}">Voltar</a>
+</div>
+
+<section class="card section-card">
+    <form method="post" class="form-grid form-grid-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label>
+            Competência
+            <input type="month" name="competencia" value="{{ form['competencia'] }}" required>
+        </label>
+
+        <label>
+            Vencimento
+            <input type="date" name="data_vencimento" value="{{ form['data_vencimento'] }}" required>
+        </label>
+
+        <label>
+            Juros previstos
+            <input type="text" name="valor_previsto" value="{{ form['valor_previsto'] }}" inputmode="decimal" required>
+            <small class="field-help">O sistema validará o valor integral conforme saldo-base e taxa.</small>
+        </label>
+
+        <label>
+            Status atual
+            <input type="text" value="{{ titulo['status'] }}" readonly>
+        </label>
+
+        <label class="field-span-2">
+            Observação
+            <textarea name="observacao" rows="3" maxlength="500">{{ form['observacao'] }}</textarea>
+        </label>
+
+        <label class="field-span-2">
+            Motivo da alteração
+            <textarea name="motivo_alteracao" rows="3" minlength="5" required placeholder="Ex.: competência/vencimento lançado incorretamente">{{ form['motivo_alteracao'] }}</textarea>
+        </label>
+
+        <label class="field-span-2">
+            Confirme sua senha
+            <input type="password" name="senha_confirmacao" required autocomplete="current-password">
+        </label>
+
+        <div class="form-actions field-span-2">
+            <a class="button button-light" href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['id']) }}">Cancelar</a>
+            <button class="button" type="submit">Salvar alteração</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

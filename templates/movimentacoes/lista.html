@@ -11,7 +11,8 @@
 
 <section class="card section-card">
     <form class="filters filters-movements" method="get">
-        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, empréstimo ou observação">
+        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, empréstimo, banco ou observação">
+
         <select name="tipo">
             <option value="todos" {{ 'selected' if tipo == 'todos' }}>Todos os tipos</option>
             <option value="emprestimo" {{ 'selected' if tipo == 'emprestimo' }}>Empréstimo</option>
@@ -19,58 +20,106 @@
             <option value="abatimento" {{ 'selected' if tipo == 'abatimento' }}>Abatimento</option>
             <option value="quitacao" {{ 'selected' if tipo == 'quitacao' }}>Quitação</option>
         </select>
-        <input type="month" name="mes" value="{{ mes }}">
+
+        <label class="filter-date-label">
+            <span>De</span>
+            <input type="date" name="data_inicio" value="{{ data_inicio }}">
+        </label>
+
+        <label class="filter-date-label">
+            <span>Até</span>
+            <input type="date" name="data_fim" value="{{ data_fim }}">
+        </label>
+
         <button class="button button-secondary" type="submit">Filtrar</button>
+        <a class="button button-light" href="{{ url_for('movimentacoes_lista') }}">Limpar</a>
     </form>
 </section>
 
-<section class="card table-card">
+<section class="card table-card movement-table-card">
 {% if movimentacoes %}
 <div class="table-responsive">
-<table>
+<table class="movements-table">
     <thead>
         <tr>
             <th>Data</th>
-            <th>Cliente</th>
-            <th>Empréstimo</th>
-            <th>Tipo</th>
-            <th>Competência</th>
+            <th>Cliente / Contrato</th>
+            <th>Movimento</th>
             <th class="text-right">Valor</th>
-            <th class="text-right">Saldo antes</th>
-            <th class="text-right">Saldo depois</th>
-            <th>Origem</th><th>Destino</th><th>Usuário</th>
-            <th>Observação</th>
+            <th>Saldo</th>
+            <th>Fluxo financeiro</th>
+            <th>Detalhes</th>
             <th>Ações</th>
         </tr>
     </thead>
     <tbody>
     {% for mov in movimentacoes %}
         <tr>
-            <td>{{ mov['data_movimento']|date_br }}</td>
-            <td><a href="{{ url_for('clientes_detalhe', cliente_id=mov['cliente_id']) }}">{{ mov['cliente_nome'] }}</a></td>
-            <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=mov['emprestimo_id']) }}">#{{ mov['emprestimo_id'] }}</a></td>
-            <td><span class="badge badge-{{ mov['tipo']|lower }}">{{ mov['tipo'] }}</span></td>
-            <td>{{ mov['competencia']|competencia_br if mov['tipo'] == 'JUROS' else '-' }}</td>
-            <td class="text-right">{{ mov['valor_centavos']|money }}</td>
-            <td class="text-right">{{ mov['saldo_antes_centavos']|money if mov['saldo_antes_centavos'] is not none else '-' }}</td>
-            <td class="text-right">{{ mov['saldo_depois_centavos']|money if mov['saldo_depois_centavos'] is not none else '-' }}</td>
-            <td>{% if mov['origem_banco'] %}{{ mov['origem_banco'] }}{% if mov['origem_pix'] %}<br><small>PIX {{ mov['origem_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
-            <td>{% if mov['destino_banco'] %}{{ mov['destino_banco'] }}{% if mov['destino_pix'] %}<br><small>PIX {{ mov['destino_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
-            <td>{{ mov['usuario_nome'] or '-' }}</td>
-            <td>
-                {{ mov['observacao'] or '-' }}
-                {% if mov['pagamento_integrado_id'] %}
-                    <br><a class="integrated-payment-link" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">Pagamento integrado #{{ mov['pagamento_integrado_id'] }}</a>
+            <td class="movement-date nowrap">{{ mov['data_movimento']|date_br }}</td>
+
+            <td class="movement-client">
+                <a href="{{ url_for('clientes_detalhe', cliente_id=mov['cliente_id']) }}"><strong>{{ mov['cliente_nome'] }}</strong></a>
+                <div class="movement-subline">
+                    <a href="{{ url_for('emprestimos_detalhe', emprestimo_id=mov['emprestimo_id']) }}">Empréstimo #{{ mov['emprestimo_id'] }}</a>
+                </div>
+            </td>
+
+            <td class="movement-type">
+                <span class="badge badge-{{ mov['tipo']|lower }}">{{ mov['tipo'] }}</span>
+                {% if mov['tipo'] == 'JUROS' %}
+                    <div class="movement-subline">{{ mov['competencia']|competencia_br }}</div>
                 {% endif %}
             </td>
-            <td>
+
+            <td class="text-right movement-value nowrap"><strong>{{ mov['valor_centavos']|money }}</strong></td>
+
+            <td class="movement-balance">
+                {% if mov['saldo_antes_centavos'] is not none %}
+                    <div><small>Antes</small> <strong>{{ mov['saldo_antes_centavos']|money }}</strong></div>
+                {% endif %}
+                {% if mov['saldo_depois_centavos'] is not none %}
+                    <div><small>Depois</small> <strong>{{ mov['saldo_depois_centavos']|money }}</strong></div>
+                {% endif %}
+            </td>
+
+            <td class="movement-flow">
+                <div class="movement-account">
+                    <small>Origem</small>
+                    <strong>{{ mov['origem_banco'] or '-' }}</strong>
+                    {% if mov['origem_pix'] %}
+                        <span class="movement-pix" title="{{ mov['origem_pix'] }}">PIX {{ mov['origem_pix'] }}</span>
+                    {% endif %}
+                </div>
+                <div class="movement-flow-arrow">↓</div>
+                <div class="movement-account">
+                    <small>Destino</small>
+                    <strong>{{ mov['destino_banco'] or '-' }}</strong>
+                    {% if mov['destino_pix'] %}
+                        <span class="movement-pix" title="{{ mov['destino_pix'] }}">PIX {{ mov['destino_pix'] }}</span>
+                    {% endif %}
+                </div>
+            </td>
+
+            <td class="movement-details">
+                <div><small>Usuário</small> {{ mov['usuario_nome'] or '-' }}</div>
+                {% if mov['observacao'] %}
+                    <div class="movement-note">{{ mov['observacao'] }}</div>
+                {% endif %}
+                {% if mov['pagamento_integrado_id'] %}
+                    <a class="integrated-payment-link" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">
+                        Pagamento integrado #{{ mov['pagamento_integrado_id'] }}
+                    </a>
+                {% endif %}
+            </td>
+
+            <td class="movement-actions">
                 <div class="actions wrap-actions">
                     {% if mov['pagamento_integrado_id'] %}
                         <a class="button button-secondary button-small" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">Abrir integrado</a>
                     {% else %}
                         <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=mov['id']) }}">Alterar</a>
                         {% if mov['tipo'] != 'EMPRESTIMO' %}
-                        <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=mov['id']) }}">Excluir</a>
+                            <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=mov['id']) }}">Excluir</a>
                         {% endif %}
                     {% endif %}
                 </div>

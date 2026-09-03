@@ -18,7 +18,7 @@
                 <option value="{{ c['id'] }}" {{ 'selected' if cliente and cliente['id'] == c['id'] }}>{{ c['nome'] }}</option>
             {% endfor %}
         </select>
-        <button class="button button-secondary" type="submit">Carregar empréstimos</button>
+        <button class="button button-secondary" type="submit">Carregar recebimentos</button>
     </form>
 </section>
 
@@ -29,7 +29,7 @@
 
     <section class="card section-card">
         <h2>2. Pagamento recebido</h2>
-        <div class="form-grid">
+        <div class="form-grid form-grid-2">
             <label>
                 Data do pagamento
                 <input type="date" name="data_pagamento" id="integrated-date" value="{{ form['data_pagamento'] }}" required>
@@ -74,12 +74,78 @@
     <section class="card section-card">
         <div class="section-title-row">
             <div>
-                <h2>3. Distribuição por empréstimo</h2>
-                <p class="muted section-subtitle">Selecione no mínimo dois contratos. Cada item vira uma movimentação JUROS no histórico daquele empréstimo.</p>
+                <h2>3. Títulos em aberto</h2>
+                <p class="muted section-subtitle">
+                    Se o juro já aparece em <strong>A Receber</strong>, selecione-o aqui.
+                    Ele será baixado e transformado na movimentação de juros do empréstimo.
+                </p>
             </div>
             <div class="integrated-sum-box">
                 <small>Soma selecionada</small>
                 <strong id="integrated-sum">R$ 0,00</strong>
+            </div>
+        </div>
+
+        {% if titulos_abertos %}
+        <div class="table-responsive">
+            <table class="integrated-open-titles-table">
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Vencimento</th>
+                        <th>Empréstimo</th>
+                        <th>Competência</th>
+                        <th>Status</th>
+                        <th>Saldo-base</th>
+                        <th>Taxa</th>
+                        <th class="text-right">Juros</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for titulo in titulos_abertos %}
+                    <tr>
+                        <td>
+                            <input
+                                class="integrated-title-check"
+                                type="checkbox"
+                                name="titulo_id"
+                                value="{{ titulo['id'] }}"
+                                data-centavos="{{ titulo['valor_previsto_centavos'] }}"
+                                {{ 'checked' if titulo['id'] in selected_title_ids }}
+                            >
+                        </td>
+                        <td>{{ titulo['data_vencimento']|date_br }}</td>
+                        <td>
+                            <a href="{{ url_for('emprestimos_detalhe', emprestimo_id=titulo['emprestimo_id']) }}">
+                                #{{ titulo['emprestimo_id'] }}
+                            </a>
+                            {% if titulo['descricao'] %}<br><small>{{ titulo['descricao'] }}</small>{% endif %}
+                        </td>
+                        <td>{{ titulo['competencia']|competencia_br }}</td>
+                        <td><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></td>
+                        <td>{{ titulo['saldo_base_centavos']|money }}</td>
+                        <td>{{ titulo['taxa_juros_mensal']|percent_br }}</td>
+                        <td class="text-right"><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <div class="empty-state compact-empty-state">
+                Este cliente não possui títulos de juros em aberto.
+            </div>
+        {% endif %}
+    </section>
+
+    <section class="card section-card">
+        <div class="section-title-row">
+            <div>
+                <h2>4. Adicionar juros que ainda não estão em aberto</h2>
+                <p class="muted section-subtitle">
+                    Use esta área para lançamentos retroativos/manuais.
+                    Se já existir um título aberto para a competência, o sistema pedirá que você use o título acima.
+                </p>
             </div>
         </div>
 
@@ -89,12 +155,12 @@
                 <tr>
                     <th></th>
                     <th>Empréstimo</th>
-                    <th>Data</th>
-                    <th>Status atual</th>
+                    <th>Data do contrato</th>
+                    <th>Status</th>
                     <th class="text-right">Saldo atual</th>
                     <th>Taxa</th>
                     <th>Competência</th>
-                    <th>Juros deste pagamento</th>
+                    <th>Juros</th>
                 </tr>
             </thead>
             <tbody>
@@ -102,7 +168,7 @@
                 {% set linha = linhas_form[loan['id']] %}
                 <tr>
                     <td>
-                        <input class="integrated-check" type="checkbox" name="emprestimo_id" value="{{ loan['id'] }}" {{ 'checked' if linha['selected'] }}>
+                        <input class="integrated-manual-check" type="checkbox" name="emprestimo_manual_id" value="{{ loan['id'] }}" {{ 'checked' if linha['selected'] }}>
                     </td>
                     <td>
                         <strong>#{{ loan['id'] }}</strong>
@@ -113,10 +179,10 @@
                     <td class="text-right">{{ loan['saldo_atual_centavos']|money }}</td>
                     <td>{{ loan['taxa_juros_mensal']|percent_br }}</td>
                     <td>
-                        <input class="integrated-competence" type="month" name="competencia_{{ loan['id'] }}" value="{{ linha['competencia'] }}">
+                        <input class="integrated-competence" type="month" name="competencia_manual_{{ loan['id'] }}" value="{{ linha['competencia'] }}">
                     </td>
                     <td>
-                        <input class="integrated-value" type="text" name="valor_{{ loan['id'] }}" value="{{ linha['valor'] }}" inputmode="decimal">
+                        <input class="integrated-manual-value" type="text" name="valor_manual_{{ loan['id'] }}" value="{{ linha['valor'] }}" inputmode="decimal">
                     </td>
                 </tr>
             {% endfor %}
@@ -125,11 +191,27 @@
         </div>
 
         <div class="info-box integrated-info">
-            <strong>Validação financeira</strong>
+            <strong>Como o lançamento é validado</strong>
             <p>
-                Para cada contrato o sistema reconstrói o saldo principal existente antes da data informada
-                e exige o juro integral correspondente à taxa do empréstimo.
+                Títulos em aberto usam o valor previsto já registrado. Nos itens manuais,
+                o sistema reconstrói o saldo principal existente na data do pagamento e exige
+                o juro integral correspondente à taxa do empréstimo.
             </p>
+        </div>
+
+        <div class="integrated-closing-bar">
+            <div>
+                <small>Valor recebido</small>
+                <strong id="integrated-total-preview">R$ 0,00</strong>
+            </div>
+            <div>
+                <small>Rateado</small>
+                <strong id="integrated-sum-footer">R$ 0,00</strong>
+            </div>
+            <div>
+                <small>Diferença</small>
+                <strong id="integrated-difference">R$ 0,00</strong>
+            </div>
         </div>
 
         <div class="form-actions">
@@ -144,15 +226,25 @@
     const root = document.getElementById('integrated-payment-form');
     if (!root) return;
 
-    const checks = [...root.querySelectorAll('.integrated-check')];
-    const sumNode = document.getElementById('integrated-sum');
+    const titleChecks = [...root.querySelectorAll('.integrated-title-check')];
+    const manualChecks = [...root.querySelectorAll('.integrated-manual-check')];
+    const totalInput = document.getElementById('integrated-total');
+
+    const sumNodes = [
+        document.getElementById('integrated-sum'),
+        document.getElementById('integrated-sum-footer')
+    ].filter(Boolean);
+    const totalPreview = document.getElementById('integrated-total-preview');
+    const differenceNode = document.getElementById('integrated-difference');
 
     const parseBR = (value) => {
         let text = String(value || '').trim().replace(/\s/g, '').replace('R$', '');
         if (!text) return 0;
+
         if (text.includes(',')) {
             text = text.replace(/\./g, '').replace(',', '.');
         }
+
         const number = Number(text);
         return Number.isFinite(number) ? number : 0;
     };
@@ -163,16 +255,45 @@
     });
 
     const updateSum = () => {
-        let total = 0;
-        for (const check of checks) {
+        let totalRateado = 0;
+
+        for (const check of titleChecks) {
             const row = check.closest('tr');
-            const value = row.querySelector('.integrated-value');
-            const enabled = check.checked;
-            value.disabled = false;
-            row.classList.toggle('integrated-selected-row', enabled);
-            if (enabled) total += parseBR(value.value);
+            row.classList.toggle('integrated-selected-row', check.checked);
+
+            if (check.checked) {
+                totalRateado += Number(check.dataset.centavos || 0) / 100;
+            }
         }
-        sumNode.textContent = formatBRL(total);
+
+        for (const check of manualChecks) {
+            const row = check.closest('tr');
+            const value = row.querySelector('.integrated-manual-value');
+            row.classList.toggle('integrated-selected-row', check.checked);
+
+            if (check.checked) {
+                totalRateado += parseBR(value.value);
+            }
+        }
+
+        const recebido = parseBR(totalInput.value);
+        const diferenca = recebido - totalRateado;
+
+        for (const node of sumNodes) {
+            node.textContent = formatBRL(totalRateado);
+        }
+
+        if (totalPreview) {
+            totalPreview.textContent = formatBRL(recebido);
+        }
+
+        if (differenceNode) {
+            differenceNode.textContent = formatBRL(diferenca);
+            differenceNode.classList.toggle(
+                'text-danger',
+                Math.abs(diferenca) > 0.005
+            );
+        }
     };
 
     root.addEventListener('input', updateSum);
