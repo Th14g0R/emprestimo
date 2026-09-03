@@ -11,7 +11,7 @@ set "PYTHON_EXE="
 if not exist "%BOOT_DIR%" mkdir "%BOOT_DIR%" >nul 2>&1
 
 echo ============================================================
-echo GERENCIADOR - SISTEMA EMPRESTIMO - V10 - V9
+echo GERENCIADOR - SISTEMA EMPRESTIMO - V17
 echo ============================================================
 echo.
 

@@ -26,6 +26,8 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
+APP_VERSION = "17.0-integrated-partial-runtime-fix"
+
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -1944,6 +1946,7 @@ def register_routes(app: Flask) -> None:
             "status": "ok",
             "database": "ok",
             "database_file": str(DATABASE_PATH),
+            "version": APP_VERSION,
         }
 
     @app.get("/debug/tabelas")
@@ -3804,6 +3807,14 @@ def register_routes(app: Flask) -> None:
                             },
                             ensure_ascii=False,
                             sort_keys=True,
+                            # Itens manuais carregam data_vencimento como
+                            # datetime.date. A auditoria precisa transformá-la
+                            # em texto ISO para não provocar TypeError/HTTP 500.
+                            default=lambda value: (
+                                value.isoformat()
+                                if isinstance(value, (date, datetime))
+                                else str(value)
+                            ),
                         ),
                     )
 
@@ -3811,11 +3822,12 @@ def register_routes(app: Flask) -> None:
                     # são persistidos em uma única transação.
                     db.commit()
 
-                except (sqlite3.DatabaseError, ValueError) as exc:
+                except Exception as exc:
                     db.rollback()
                     app.logger.exception("Erro ao registrar pagamento integrado")
                     flash(
-                        f"O pagamento integrado não foi gravado: {exc}",
+                        "O pagamento integrado não foi gravado. "
+                        f"Erro interno: {type(exc).__name__}: {exc}",
                         "danger",
                     )
                 else:

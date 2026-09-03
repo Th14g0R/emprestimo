@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet('Instalar', 'Atualizar', 'Desinstalar', 'ConfigurarAcesso')]
+    [ValidateSet('Instalar', 'Atualizar', 'Desinstalar', 'ConfigurarAcesso', 'Verificar')]
     [string]$Acao,
 
     [string]$InstallPath,
@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Script:InstallerVersion = '10.0-network-hosting-ready'
+$Script:InstallerVersion = '17.0-exact-git-sync'
 $Script:RepoUrl = 'https://github.com/Th14g0R/emprestimo.git'
 $Script:Branch = 'main'
 $Script:ServiceName = 'Emprestimo'
@@ -1476,6 +1476,134 @@ function Install-Emprestimo {
     }
 }
 
+function Get-GitWorkingTreeChanges {
+    param(
+        [Parameter(Mandatory)] [string]$GitExe,
+        [Parameter(Mandatory)] [string]$Path
+    )
+
+    $lines = @(
+        & $GitExe -C $Path status --porcelain --untracked-files=all
+    )
+
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Falha ao consultar o estado dos arquivos instalados.'
+    }
+
+    return @($lines | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+function Assert-InstalledCodeIntegrity {
+    param(
+        [Parameter(Mandatory)] [string]$GitExe,
+        [Parameter(Mandatory)] [string]$Path,
+        [string]$Reference = 'HEAD'
+    )
+
+    $changes = @(Get-GitWorkingTreeChanges -GitExe $GitExe -Path $Path)
+
+    if ($changes.Count -gt 0) {
+        Write-Warn 'Ainda existem diferenças em arquivos versionados:'
+        $changes | Select-Object -First 20 | ForEach-Object {
+            Write-Host "    $_" -ForegroundColor Yellow
+        }
+        throw 'A pasta instalada não corresponde exatamente ao repositório Git.'
+    }
+
+    $appPath = Join-Path $Path 'app.py'
+    if (Test-Path -LiteralPath $appPath) {
+        $workBlob = (& $GitExe -C $Path hash-object -- app.py).Trim()
+        $commitBlob = (& $GitExe -C $Path rev-parse "${Reference}:app.py").Trim()
+
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commitBlob)) {
+            throw "Não foi possível obter o hash de app.py em $Reference."
+        }
+
+        if ($workBlob -ne $commitBlob) {
+            throw 'app.py instalado difere do app.py registrado no commit.'
+        }
+
+        Write-Ok "app.py confere com $Reference (Git blob $workBlob)."
+    }
+
+    Write-Ok 'Arquivos versionados da instalação estão íntegros.'
+}
+
+function Show-EmprestimoCodeVerification {
+    Write-Title 'VERIFICAÇÃO - Código instalado'
+
+    $info = Get-InstallInfo
+    if (-not $info) {
+        throw 'Instalação do Emprestimo não encontrada.'
+    }
+
+    $path = $info.InstallPath
+    $git = Resolve-Git
+
+    if (-not (Test-Path -LiteralPath (Join-Path $path '.git'))) {
+        throw "A pasta '$path' não contém o repositório Git."
+    }
+
+    Write-Step 'Atualizando referências do GitHub...'
+    & $git -C $path fetch origin $Script:Branch --prune
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Falha no git fetch.'
+    }
+
+    $current = (& $git -C $path rev-parse HEAD).Trim()
+    $remote = (& $git -C $path rev-parse "origin/$($Script:Branch)").Trim()
+    $changes = @(Get-GitWorkingTreeChanges -GitExe $git -Path $path)
+
+    Write-Host "Pasta instalada: $path"
+    Write-Host "Commit instalado: $current"
+    Write-Host "Commit remoto:    $remote"
+
+    if ($current -eq $remote) {
+        Write-Ok 'Commit instalado é o mesmo commit remoto.'
+    }
+    else {
+        Write-Warn 'O commit instalado está diferente do GitHub.'
+    }
+
+    if ($changes.Count -eq 0) {
+        Write-Ok 'Não existem alterações locais em arquivos versionados.'
+    }
+    else {
+        Write-Warn 'Existem alterações locais dentro da instalação:'
+        $changes | Select-Object -First 30 | ForEach-Object {
+            Write-Host "    $_" -ForegroundColor Yellow
+        }
+    }
+
+    $appPath = Join-Path $path 'app.py'
+    if (Test-Path -LiteralPath $appPath) {
+        $workingBlob = (& $git -C $path hash-object -- app.py).Trim()
+        $remoteBlob = (& $git -C $path rev-parse "origin/$($Script:Branch):app.py").Trim()
+
+        Write-Host "app.py instalado: $workingBlob"
+        Write-Host "app.py remoto:    $remoteBlob"
+
+        if ($workingBlob -eq $remoteBlob) {
+            Write-Ok 'app.py instalado é exatamente o mesmo do GitHub.'
+        }
+        else {
+            Write-Warn 'app.py instalado NÃO é o mesmo arquivo do GitHub.'
+        }
+    }
+
+    try {
+        $response = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:$($info.Port)/health" `
+            -TimeoutSec 5
+
+        Write-Host "Versão carregada pelo serviço: $($response.version)"
+        Write-Ok 'O serviço respondeu ao /health.'
+    }
+    catch {
+        Write-Warn "Não foi possível consultar /health: $($_.Exception.Message)"
+    }
+}
+
 function Repair-EmprestimoRuntime {
     param(
         [Parameter(Mandatory)] [string]$Path,
@@ -1509,7 +1637,7 @@ function Repair-EmprestimoRuntime {
 function Update-Emprestimo {
     param([object]$Info)
 
-    Write-Title 'ATUALIZAÇÃO / REPARO - Sistema Emprestimo'
+    Write-Title 'ATUALIZAÇÃO / SINCRONIZAÇÃO - Sistema Emprestimo'
 
     if (-not $Info) {
         $Info = Get-InstallInfo
@@ -1532,22 +1660,28 @@ function Update-Emprestimo {
     Write-Step 'Consultando repositório remoto...'
 
     & $git -C $path fetch origin $Script:Branch --prune
-
     if ($LASTEXITCODE -ne 0) {
         throw 'Falha no git fetch.'
     }
 
     $current = (& $git -C $path rev-parse HEAD).Trim()
     $remote = (& $git -C $path rev-parse "origin/$($Script:Branch)").Trim()
+    $changes = @(Get-GitWorkingTreeChanges -GitExe $git -Path $path)
 
     Write-Host "Commit instalado: $current"
     Write-Host "Commit remoto:    $remote"
 
-    if ($current -eq $remote) {
-        Write-Ok 'O código já está na mesma versão do repositório.'
-        Write-Warn 'O gerenciador pode reparar/recriar o ambiente e o serviço mesmo sem atualização de código.'
+    if ($changes.Count -gt 0) {
+        Write-Warn 'Foram encontradas diferenças locais na pasta instalada:'
+        $changes | Select-Object -First 20 | ForEach-Object {
+            Write-Host "    $_" -ForegroundColor Yellow
+        }
+    }
 
-        if (-not (Ask-YesNo 'Deseja reparar o ambiente e o serviço agora?' $true)) {
+    if ($current -eq $remote -and $changes.Count -eq 0) {
+        Write-Ok 'Código instalado já corresponde ao GitHub.'
+
+        if (-not (Ask-YesNo 'Deseja reparar/reiniciar o ambiente e o serviço?' $true)) {
             return
         }
 
@@ -1556,6 +1690,11 @@ function Update-Emprestimo {
             -Info $Info `
             -SystemPython $python.Exe
 
+        Assert-InstalledCodeIntegrity `
+            -GitExe $git `
+            -Path $path `
+            -Reference 'HEAD'
+
         Write-Title 'REPARO CONCLUÍDO'
         Write-Host "Pasta:   $path"
         Write-Host "Serviço: $($Script:ServiceName)"
@@ -1563,10 +1702,16 @@ function Update-Emprestimo {
         return
     }
 
-    Write-Warn 'Há atualização de código disponível.'
+    if ($current -eq $remote) {
+        Write-Warn 'O commit é o mesmo, mas os arquivos instalados foram modificados localmente.'
+        Write-Warn 'A sincronização vai restaurar os arquivos versionados exatamente como estão no GitHub.'
+    }
+    else {
+        Write-Warn 'Há atualização de código disponível no GitHub.'
+    }
 
-    if (-not (Ask-YesNo 'Deseja aplicar a atualização agora?' $true)) {
-        Write-Warn 'Atualização cancelada.'
+    if (-not (Ask-YesNo 'Deseja sincronizar exatamente com o GitHub e reparar o serviço agora?' $true)) {
+        Write-Warn 'Sincronização cancelada.'
         return
     }
 
@@ -1574,28 +1719,36 @@ function Update-Emprestimo {
     $null = Backup-Data -Path $path -Reason 'pre-update'
 
     try {
-        Write-Step 'Atualizando arquivos versionados...'
+        Write-Step 'Restaurando arquivos versionados exatamente do GitHub...'
 
         & $git -C $path reset --hard "origin/$($Script:Branch)"
-
         if ($LASTEXITCODE -ne 0) {
             throw 'Falha no git reset.'
         }
 
-        # Sem -x: data, .venv, logs e service ignorados pelo Git são preservados.
+        # Sem -x: arquivos ignorados (data, .venv, logs e service) são preservados.
         & $git -C $path clean -fd
-
         if ($LASTEXITCODE -ne 0) {
             throw 'Falha no git clean.'
         }
+
+        Assert-InstalledCodeIntegrity `
+            -GitExe $git `
+            -Path $path `
+            -Reference "origin/$($Script:Branch)"
 
         Repair-EmprestimoRuntime `
             -Path $path `
             -Info $Info `
             -SystemPython $python.Exe
+
+        Assert-InstalledCodeIntegrity `
+            -GitExe $git `
+            -Path $path `
+            -Reference 'HEAD'
     }
     catch {
-        Write-Warn "Falha durante atualização/reparo: $($_.Exception.Message)"
+        Write-Warn "Falha durante atualização/sincronização: $($_.Exception.Message)"
         Write-Warn 'O backup pré-atualização foi preservado.'
 
         try {
@@ -1611,6 +1764,17 @@ function Update-Emprestimo {
 
     Write-Title 'ATUALIZAÇÃO CONCLUÍDA'
     Write-Host "Novo commit: $newCommit" -ForegroundColor Green
+
+    try {
+        $health = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:$($Info.Port)/health" `
+            -TimeoutSec 5
+
+        Write-Host "Versão carregada: $($health.version)" -ForegroundColor Green
+    }
+    catch {
+        Write-Warn "Não foi possível ler a versão em /health: $($_.Exception.Message)"
+    }
 }
 
 function Configure-EmprestimoAccess {
@@ -1754,6 +1918,7 @@ function Show-Menu {
     Write-Host '2 - Atualizar'
     Write-Host '3 - Desinstalar'
     Write-Host '4 - Configurar acesso/rede'
+    Write-Host '5 - Verificar versão/arquivos instalados'
     Write-Host '0 - Sair'
 
     while ($true) {
@@ -1763,6 +1928,7 @@ function Show-Menu {
             '2' { return 'Atualizar' }
             '3' { return 'Desinstalar' }
             '4' { return 'ConfigurarAcesso' }
+            '5' { return 'Verificar' }
             '0' { return 'Sair' }
             default { Write-Warn 'Opção inválida.' }
         }
@@ -1789,6 +1955,7 @@ try {
         'Atualizar' { Update-Emprestimo }
         'Desinstalar' { Uninstall-Emprestimo }
         'ConfigurarAcesso' { Configure-EmprestimoAccess }
+        'Verificar' { Show-EmprestimoCodeVerification }
         default { throw "Ação inválida: $SelectedAction" }
     }
 }
