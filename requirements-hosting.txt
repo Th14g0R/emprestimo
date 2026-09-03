@@ -1,0 +1,5 @@
+# Dependências adicionais para hospedagem Linux genérica.
+# Instale após requirements.txt:
+#   pip install -r requirements-hosting.txt
+
+gunicorn>=26.2,<27; platform_system != "Windows"

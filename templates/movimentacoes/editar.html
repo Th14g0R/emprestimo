@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Alterar movimentação #{{ movimento['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div><h1>Alterar movimentação #{{ movimento['id'] }}</h1><p class="muted">{{ movimento['tipo'] }} · Empréstimo #{{ movimento['emprestimo_id'] }} · {{ movimento['cliente_nome'] }}</p></div>
+    <a class="button button-light" href="{{ url_for('emprestimos_detalhe', emprestimo_id=movimento['emprestimo_id']) }}">Cancelar</a>
+</div>
+<div class="detail-grid">
+<section class="card section-card">
+    <h2>Registro atual</h2>
+    <dl class="details">
+        <dt>Tipo</dt><dd><span class="badge badge-{{ movimento['tipo']|lower }}">{{ movimento['tipo'] }}</span></dd>
+        <dt>Valor</dt><dd>{{ movimento['valor_centavos']|money }}</dd>
+        <dt>Data</dt><dd>{{ movimento['data_movimento']|date_br }}</dd>
+        {% if movimento['tipo'] == 'JUROS' %}<dt>Competência</dt><dd>{{ movimento['competencia']|competencia_br }}</dd>{% endif %}
+    </dl>
+    <div class="info-box compact-info">A gravação só é concluída após validar a senha do usuário logado. O antes/depois e o motivo ficam na auditoria.</div>
+</section>
+<section class="card section-card">
+    <h2>Correção</h2>
+    <form method="post" class="form-grid form-grid-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Data<input type="date" name="data_movimento" value="{{ form['data_movimento'] }}" {% if movimento['tipo'] == 'EMPRESTIMO' %}readonly{% endif %} required>{% if movimento['tipo'] == 'EMPRESTIMO' %}<small>A data inicial pertence ao contrato.</small>{% endif %}</label>
+        {% if movimento['tipo'] == 'JUROS' %}<label>Competência<input type="month" name="competencia" value="{{ form['competencia'] }}" required></label>{% endif %}
+        <label>Valor{% if movimento['tipo'] == 'ABATIMENTO' %}<input type="text" name="valor" value="{{ form['valor'] }}" inputmode="decimal" required><small>O saldo e movimentos posteriores serão revalidados.</small>{% else %}<input type="text" value="{{ movimento['valor_centavos']|money }}" readonly><small>{% if movimento['tipo'] == 'JUROS' %}Juros permanecem integrais.{% elif movimento['tipo'] == 'QUITACAO' %}Quitação corresponde ao saldo integral.{% else %}O valor original pertence ao contrato.{% endif %}</small>{% endif %}</label>
+        {% if movimento['tipo'] == 'EMPRESTIMO' %}{% set contas_origem = contas_proprias %}{% set contas_destino = contas_cliente %}{% else %}{% set contas_origem = contas_cliente %}{% set contas_destino = contas_proprias %}{% endif %}
+        <label>Conta de origem<select name="conta_origem_id" required><option value="">Selecione</option>{% for conta in contas_origem %}<option value="{{ conta['id'] }}" {{ 'selected' if conta['id'] == form['conta_origem_id'] }}>{{ conta['banco'] }}{% if conta['descricao'] %} · {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} · PIX {{ conta['chave_pix'] }}{% endif %}</option>{% endfor %}</select></label>
+        <label>Conta de destino<select name="conta_destino_id" required><option value="">Selecione</option>{% for conta in contas_destino %}<option value="{{ conta['id'] }}" {{ 'selected' if conta['id'] == form['conta_destino_id'] }}>{{ conta['banco'] }}{% if conta['descricao'] %} · {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} · PIX {{ conta['chave_pix'] }}{% endif %}</option>{% endfor %}</select></label>
+        <label class="field-span-2">Observação<textarea name="observacao" rows="3">{{ form['observacao'] }}</textarea></label>
+        <label class="field-span-2">Motivo da correção<textarea name="motivo_correcao" rows="2" required placeholder="Ex.: banco de destino informado incorretamente">{{ form['motivo_correcao'] }}</textarea></label>
+        <label class="field-span-2">Senha do usuário logado<input type="password" name="senha_confirmacao" autocomplete="current-password" required><small>Confirmação obrigatória para salvar a alteração.</small></label>
+        <div class="form-actions field-span-2"><a class="button button-light" href="{{ url_for('emprestimos_detalhe', emprestimo_id=movimento['emprestimo_id']) }}">Cancelar</a><button class="button" type="submit">Confirmar alteração</button></div>
+    </form>
+</section>
+</div>
+{% endblock %}

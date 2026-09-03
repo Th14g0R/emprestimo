@@ -55,7 +55,7 @@
         </dl>
 
         <div class="info-box compact-info">
-            Os lançamentos financeiros permanecem imutáveis. Juros não reduzem o principal; somente abatimento e quitação alteram o saldo. Se futuramente for criada correção de valor já lançado, ela exigirá confirmação da senha do usuário logado.
+            Juros não reduzem o principal; somente abatimento e quitação alteram o saldo. Correções e exclusões de movimentações exigem a senha do usuário atualmente logado, um motivo e ficam registradas na auditoria.
         </div>
     </section>
 
@@ -82,6 +82,7 @@
                         <th>Destino</th>
                         <th>Usuário</th>
                         <th>Observação</th>
+                        <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -97,6 +98,14 @@
                         <td>{% if movimento['destino_banco'] %}{{ movimento['destino_banco'] }}{% if movimento['destino_pix'] %}<br><small>PIX {{ movimento['destino_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
                         <td>{{ movimento['usuario_nome'] or '-' }}</td>
                         <td>{{ movimento['observacao'] or '-' }}</td>
+                        <td>
+                            <div class="actions wrap-actions">
+                                <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=movimento['id']) }}">Alterar</a>
+                                {% if movimento['tipo'] != 'EMPRESTIMO' %}
+                                <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=movimento['id']) }}">Excluir</a>
+                                {% endif %}
+                            </div>
+                        </td>
                     </tr>
                 {% endfor %}
                 </tbody>

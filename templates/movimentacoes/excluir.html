@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Excluir movimentação #{{ movimento['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Excluir movimentação #{{ movimento['id'] }}</h1><p class="muted">Confirmação protegida por senha.</p></div><a class="button button-light" href="{{ url_for('emprestimos_detalhe', emprestimo_id=movimento['emprestimo_id']) }}">Cancelar</a></div>
+<div class="detail-grid">
+<section class="card section-card"><h2>Movimentação</h2><dl class="details"><dt>Cliente</dt><dd>{{ movimento['cliente_nome'] }}</dd><dt>Empréstimo</dt><dd>#{{ movimento['emprestimo_id'] }}</dd><dt>Tipo</dt><dd><span class="badge badge-{{ movimento['tipo']|lower }}">{{ movimento['tipo'] }}</span></dd><dt>Data</dt><dd>{{ movimento['data_movimento']|date_br }}</dd>{% if movimento['tipo'] == 'JUROS' %}<dt>Competência</dt><dd>{{ movimento['competencia']|competencia_br }}</dd>{% endif %}<dt>Valor</dt><dd>{{ movimento['valor_centavos']|money }}</dd><dt>Observação</dt><dd>{{ movimento['observacao'] or '-' }}</dd></dl></section>
+<section class="card section-card"><h2>Confirmar exclusão</h2><div class="alert alert-danger">A exclusão remove a movimentação do histórico operacional e recalcula o contrato. Uma cópia do registro excluído e o motivo permanecerão na auditoria.</div><form method="post" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Motivo da exclusão<textarea name="motivo_exclusao" rows="3" required placeholder="Explique por que este lançamento deve ser removido"></textarea></label><label>Senha do usuário logado<input type="password" name="senha_confirmacao" autocomplete="current-password" required></label><div class="form-actions"><a class="button button-light" href="{{ url_for('emprestimos_detalhe', emprestimo_id=movimento['emprestimo_id']) }}">Cancelar</a><button class="button button-danger" type="submit">Excluir movimentação</button></div></form></section>
+</div>
+{% endblock %}

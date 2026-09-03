@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -22,17 +23,54 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DATABASE_PATH = DATA_DIR / "emprestimos.db"
-SECRET_KEY_PATH = DATA_DIR / ".secret_key"
+
+# Em Windows/local, o padrão continua sendo <projeto>/data.
+# Em hospedagens com volume persistente, EMPRESTIMO_DATA_DIR permite apontar
+# banco e chave para o diretório persistente fornecido pelo provedor.
+DATA_DIR = Path(
+    os.environ.get("EMPRESTIMO_DATA_DIR", str(BASE_DIR / "data"))
+).expanduser().resolve()
+
+DATABASE_PATH = Path(
+    os.environ.get(
+        "EMPRESTIMO_DATABASE",
+        str(DATA_DIR / "emprestimos.db"),
+    )
+).expanduser().resolve()
+
+SECRET_KEY_PATH = Path(
+    os.environ.get(
+        "EMPRESTIMO_SECRET_KEY_FILE",
+        str(DATA_DIR / ".secret_key"),
+    )
+).expanduser().resolve()
 
 F = TypeVar("F", bound=Callable[..., Any])
 CENTAVOS = Decimal("100")
 DUAS_CASAS = Decimal("0.01")
+
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+
+    return value.strip().lower() in {"1", "true", "yes", "sim", "on"}
+
+
+def env_list(name: str) -> list[str]:
+    value = os.environ.get(name, "")
+    return [
+        item.strip()
+        for item in value.split(",")
+        if item.strip()
+    ]
 
 
 def create_app() -> Flask:
@@ -45,9 +83,26 @@ def create_app() -> Flask:
         SECRET_KEY=os.environ.get("SECRET_KEY") or load_or_create_secret_key(),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
-        SESSION_COOKIE_SECURE=False,  # localhost usa HTTP; altere para True se publicar com HTTPS.
+        # Em hospedagem HTTPS configure EMPRESTIMO_HTTPS=1.
+        SESSION_COOKIE_SECURE=env_bool("EMPRESTIMO_HTTPS", False),
         MAX_CONTENT_LENGTH=2 * 1024 * 1024,
     )
+
+    trusted_hosts = env_list("EMPRESTIMO_TRUSTED_HOSTS")
+    if trusted_hosts:
+        app.config["TRUSTED_HOSTS"] = trusted_hosts
+
+    # Use somente quando houver exatamente um reverse proxy confiável
+    # (Caddy/Nginx/Apache/provedor) na frente da aplicação.
+    if env_bool("EMPRESTIMO_BEHIND_PROXY", False):
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=1,
+            x_proto=1,
+            x_host=1,
+            x_port=1,
+            x_prefix=1,
+        )
 
     app.teardown_appcontext(close_db)
 
@@ -313,6 +368,8 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     add_column_if_missing(db, "movimentacoes_emprestimo", "origem_pix_snapshot", "TEXT")
     add_column_if_missing(db, "movimentacoes_emprestimo", "destino_banco_snapshot", "TEXT")
     add_column_if_missing(db, "movimentacoes_emprestimo", "destino_pix_snapshot", "TEXT")
+    add_column_if_missing(db, "movimentacoes_emprestimo", "updated_at", "TEXT")
+    add_column_if_missing(db, "movimentacoes_emprestimo", "usuario_ultima_alteracao_id", "INTEGER")
     add_column_if_missing(db, "lancamentos_cartao", "usuario_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "conta_origem_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "conta_destino_id", "INTEGER")
@@ -716,6 +773,213 @@ def validate_money_flow_accounts(
             errors.append("No recebimento, a conta de destino deve ser uma conta própria.")
 
     return errors
+
+
+def get_movimentacao_or_404(movimentacao_id: int) -> sqlite3.Row:
+    row = get_db().execute(
+        """
+        SELECT m.*,
+               e.cliente_id,
+               e.data_emprestimo,
+               e.valor_original_centavos,
+               e.taxa_juros_mensal,
+               e.status AS emprestimo_status,
+               c.nome AS cliente_nome
+          FROM movimentacoes_emprestimo m
+          JOIN emprestimos e ON e.id = m.emprestimo_id
+          JOIN clientes c ON c.id = e.cliente_id
+         WHERE m.id = ?
+        """,
+        (movimentacao_id,),
+    ).fetchone()
+
+    if row is None:
+        abort(404)
+
+    return row
+
+
+def validar_senha_usuario_atual(senha: str | None) -> bool:
+    """Confirma a senha do usuário atualmente autenticado."""
+    if g.usuario is None or not senha:
+        return False
+
+    row = get_db().execute(
+        """
+        SELECT senha_hash, ativo
+          FROM usuarios
+         WHERE id = ?
+        """,
+        (g.usuario["id"],),
+    ).fetchone()
+
+    return bool(
+        row
+        and row["ativo"]
+        and check_password_hash(row["senha_hash"], senha)
+    )
+
+
+def movimentacao_para_auditoria(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "id",
+        "emprestimo_id",
+        "tipo",
+        "data_movimento",
+        "competencia",
+        "valor_centavos",
+        "conta_origem_id",
+        "conta_destino_id",
+        "origem_banco_snapshot",
+        "origem_pix_snapshot",
+        "destino_banco_snapshot",
+        "destino_pix_snapshot",
+        "observacao",
+        "saldo_antes_centavos",
+        "saldo_depois_centavos",
+        "usuario_id",
+    )
+    return {key: row[key] for key in keys if key in row.keys()}
+
+
+def recalcular_emprestimo_por_movimentacoes(
+    db: sqlite3.Connection,
+    emprestimo_id: int,
+) -> int:
+    """Reconstitui o saldo do contrato após correções e exclusões."""
+    emprestimo = db.execute(
+        """
+        SELECT id, data_emprestimo, valor_original_centavos,
+               taxa_juros_mensal, status
+          FROM emprestimos
+         WHERE id = ?
+        """,
+        (emprestimo_id,),
+    ).fetchone()
+
+    if emprestimo is None:
+        raise ValueError("Empréstimo não encontrado para recálculo.")
+
+    movimentos = db.execute(
+        """
+        SELECT id, tipo, data_movimento, valor_centavos, competencia
+          FROM movimentacoes_emprestimo
+         WHERE emprestimo_id = ?
+         ORDER BY data_movimento, id
+        """,
+        (emprestimo_id,),
+    ).fetchall()
+
+    valor_original = int(emprestimo["valor_original_centavos"])
+    saldo = valor_original
+    encontrou_movimento_inicial = False
+    contrato_encerrado = False
+
+    for movimento in movimentos:
+        movimento_id = int(movimento["id"])
+        tipo = movimento["tipo"]
+        valor = int(movimento["valor_centavos"])
+
+        if tipo == "EMPRESTIMO":
+            if encontrou_movimento_inicial:
+                raise ValueError("Existe mais de uma movimentação inicial de empréstimo.")
+
+            encontrou_movimento_inicial = True
+            saldo = valor_original
+            db.execute(
+                """
+                UPDATE movimentacoes_emprestimo
+                   SET valor_centavos = ?,
+                       saldo_antes_centavos = 0,
+                       saldo_depois_centavos = ?
+                 WHERE id = ?
+                """,
+                (valor_original, valor_original, movimento_id),
+            )
+            continue
+
+        if contrato_encerrado or saldo <= 0:
+            raise ValueError(
+                f"A movimentação #{movimento_id} ocorre depois da quitação do contrato."
+            )
+
+        if movimento["data_movimento"] < emprestimo["data_emprestimo"]:
+            raise ValueError(
+                f"A movimentação #{movimento_id} possui data anterior ao empréstimo."
+            )
+
+        saldo_antes = saldo
+
+        if tipo == "JUROS":
+            valor_esperado = calcular_juros_centavos(
+                saldo,
+                emprestimo["taxa_juros_mensal"],
+            )
+            if valor != valor_esperado:
+                raise ValueError(
+                    "A correção deixaria os juros "
+                    f"#{movimento_id} inconsistentes: registrado "
+                    f"{format_money(valor)}, esperado {format_money(valor_esperado)} "
+                    "para o saldo existente naquela data."
+                )
+            saldo_depois = saldo
+
+        elif tipo == "ABATIMENTO":
+            if valor <= 0 or valor >= saldo:
+                raise ValueError(
+                    f"O abatimento #{movimento_id} precisa ser maior que zero e menor "
+                    f"que o saldo de {format_money(saldo)} existente naquele momento."
+                )
+            saldo -= valor
+            saldo_depois = saldo
+
+        elif tipo == "QUITACAO":
+            if valor != saldo:
+                raise ValueError(
+                    f"A quitação #{movimento_id} é de {format_money(valor)}, mas o saldo "
+                    f"naquele momento seria {format_money(saldo)}. Corrija as movimentações "
+                    "anteriores antes desta operação."
+                )
+            saldo = 0
+            saldo_depois = 0
+            contrato_encerrado = True
+
+        else:
+            raise ValueError(f"Tipo de movimentação desconhecido: {tipo}.")
+
+        db.execute(
+            """
+            UPDATE movimentacoes_emprestimo
+               SET saldo_antes_centavos = ?,
+                   saldo_depois_centavos = ?
+             WHERE id = ?
+            """,
+            (saldo_antes, saldo_depois, movimento_id),
+        )
+
+    if not encontrou_movimento_inicial:
+        raise ValueError("A movimentação inicial do empréstimo não foi encontrada.")
+
+    status_anterior = emprestimo["status"]
+    if saldo == 0:
+        novo_status = "QUITADO"
+    elif status_anterior == "VENCIDO":
+        novo_status = "VENCIDO"
+    else:
+        novo_status = "ATIVO"
+
+    db.execute(
+        """
+        UPDATE emprestimos
+           SET saldo_atual_centavos = ?,
+               status = ?,
+               updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?
+        """,
+        (saldo, novo_status, emprestimo_id),
+    )
+
+    return saldo
 
 
 def refresh_overdue_card_installments(db: sqlite3.Connection) -> None:
@@ -1981,6 +2245,235 @@ def register_routes(app: Flask) -> None:
 
     # -------------------- Movimentações --------------------
 
+    @app.route("/movimentacoes/<int:movimentacao_id>/editar", methods=["GET", "POST"])
+    @login_required
+    def movimentacoes_editar(movimentacao_id: int):
+        movimento = get_movimentacao_or_404(movimentacao_id)
+        emprestimo = get_emprestimo_or_404(movimento["emprestimo_id"])
+        contas_cliente = get_client_accounts(emprestimo["cliente_id"])
+        contas_proprias = get_own_accounts()
+
+        form = {
+            "data_movimento": request.form.get("data_movimento", movimento["data_movimento"]),
+            "competencia": request.form.get("competencia", movimento["competencia"] or ""),
+            "valor": request.form.get("valor", format_money(movimento["valor_centavos"]).replace("R$ ", "")),
+            "conta_origem_id": parse_int(request.form.get("conta_origem_id")) if request.method == "POST" else movimento["conta_origem_id"],
+            "conta_destino_id": parse_int(request.form.get("conta_destino_id")) if request.method == "POST" else movimento["conta_destino_id"],
+            "observacao": request.form.get("observacao", movimento["observacao"] or ""),
+            "motivo_correcao": request.form.get("motivo_correcao", ""),
+        }
+
+        if request.method == "POST":
+            errors: list[str] = []
+            senha = request.form.get("senha_confirmacao", "")
+            motivo = form["motivo_correcao"].strip()
+
+            if not validar_senha_usuario_atual(senha):
+                errors.append("A senha de confirmação do usuário logado é inválida.")
+
+            if len(motivo) < 5:
+                errors.append("Informe o motivo da correção com pelo menos 5 caracteres.")
+
+            if movimento["tipo"] == "EMPRESTIMO":
+                data_movimento = date.fromisoformat(movimento["data_movimento"])
+            else:
+                data_movimento = parse_iso_date(form["data_movimento"])
+                if data_movimento is None:
+                    errors.append("Informe uma data válida para a movimentação.")
+                elif data_movimento < date.fromisoformat(emprestimo["data_emprestimo"]):
+                    errors.append("A data não pode ser anterior à data do empréstimo.")
+
+            competencia = movimento["competencia"]
+            if movimento["tipo"] == "JUROS":
+                competencia = parse_competencia(form["competencia"])
+                if competencia is None:
+                    errors.append("Informe uma competência válida para os juros.")
+                elif competencia < emprestimo["data_emprestimo"][:7]:
+                    errors.append("A competência não pode ser anterior ao mês do empréstimo.")
+                else:
+                    duplicate = get_db().execute(
+                        """
+                        SELECT id
+                          FROM movimentacoes_emprestimo
+                         WHERE emprestimo_id = ?
+                           AND tipo = 'JUROS'
+                           AND competencia = ?
+                           AND id <> ?
+                         LIMIT 1
+                        """,
+                        (movimento["emprestimo_id"], competencia, movimentacao_id),
+                    ).fetchone()
+                    if duplicate:
+                        errors.append(
+                            f"Já existem juros para {format_competencia_br(competencia)} neste empréstimo."
+                        )
+
+            valor_centavos = int(movimento["valor_centavos"])
+            if movimento["tipo"] == "ABATIMENTO":
+                valor_editado = parse_money_to_centavos(form["valor"])
+                if valor_editado is None or valor_editado <= 0:
+                    errors.append("Informe um valor de abatimento maior que zero.")
+                else:
+                    valor_centavos = int(valor_editado)
+
+            errors.extend(
+                validate_money_flow_accounts(
+                    emprestimo["cliente_id"],
+                    form["conta_origem_id"],
+                    form["conta_destino_id"],
+                    is_loan_disbursement=movimento["tipo"] == "EMPRESTIMO",
+                )
+            )
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                db = get_db()
+                before = movimentacao_para_auditoria(movimento)
+
+                origem_banco = movimento["origem_banco_snapshot"]
+                origem_pix = movimento["origem_pix_snapshot"]
+                destino_banco = movimento["destino_banco_snapshot"]
+                destino_pix = movimento["destino_pix_snapshot"]
+
+                if form["conta_origem_id"] != movimento["conta_origem_id"]:
+                    origem = get_account(form["conta_origem_id"])
+                    origem_banco = origem["banco"] if origem else None
+                    origem_pix = origem["chave_pix"] if origem else None
+
+                if form["conta_destino_id"] != movimento["conta_destino_id"]:
+                    destino = get_account(form["conta_destino_id"])
+                    destino_banco = destino["banco"] if destino else None
+                    destino_pix = destino["chave_pix"] if destino else None
+
+                try:
+                    db.execute(
+                        """
+                        UPDATE movimentacoes_emprestimo
+                           SET data_movimento = ?, competencia = ?, valor_centavos = ?,
+                               conta_origem_id = ?, conta_destino_id = ?,
+                               origem_banco_snapshot = ?, origem_pix_snapshot = ?,
+                               destino_banco_snapshot = ?, destino_pix_snapshot = ?,
+                               observacao = ?, usuario_ultima_alteracao_id = ?,
+                               updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                        """,
+                        (
+                            data_movimento.isoformat(), competencia, valor_centavos,
+                            form["conta_origem_id"], form["conta_destino_id"],
+                            origem_banco, origem_pix, destino_banco, destino_pix,
+                            normalize_optional(form["observacao"]), g.usuario["id"],
+                            movimentacao_id,
+                        ),
+                    )
+
+                    # Corrigir apenas banco/PIX/observação/competência não altera
+                    # o principal. Recalcular toda a cadeia só é necessário se
+                    # a cronologia ou um valor que reduz saldo foi modificado.
+                    precisa_recalcular = (
+                        data_movimento.isoformat() != movimento["data_movimento"]
+                        or (
+                            movimento["tipo"] == "ABATIMENTO"
+                            and valor_centavos != int(movimento["valor_centavos"])
+                        )
+                    )
+                    if precisa_recalcular:
+                        recalcular_emprestimo_por_movimentacoes(
+                            db,
+                            int(movimento["emprestimo_id"]),
+                        )
+
+                    after_row = db.execute(
+                        "SELECT * FROM movimentacoes_emprestimo WHERE id = ?",
+                        (movimentacao_id,),
+                    ).fetchone()
+                    registrar_auditoria(
+                        db, "movimentacao_emprestimo", movimentacao_id, "EDITADA",
+                        json.dumps(
+                            {"motivo": motivo, "antes": before, "depois": movimentacao_para_auditoria(after_row)},
+                            ensure_ascii=False, sort_keys=True,
+                        ),
+                    )
+                    db.commit()
+                except (sqlite3.DatabaseError, ValueError) as exc:
+                    db.rollback()
+                    app.logger.exception("Erro ao corrigir movimentação")
+                    flash(f"A correção não foi gravada: {exc}", "danger")
+                else:
+                    flash("Movimentação corrigida com sucesso. A alteração foi registrada na auditoria.", "success")
+                    return redirect(url_for("emprestimos_detalhe", emprestimo_id=movimento["emprestimo_id"]))
+
+        return render_template(
+            "movimentacoes/editar.html",
+            movimento=movimento,
+            emprestimo=emprestimo,
+            form=form,
+            contas_cliente=contas_cliente,
+            contas_proprias=contas_proprias,
+        )
+
+    @app.route("/movimentacoes/<int:movimentacao_id>/excluir", methods=["GET", "POST"])
+    @login_required
+    def movimentacoes_excluir(movimentacao_id: int):
+        movimento = get_movimentacao_or_404(movimentacao_id)
+
+        if movimento["tipo"] == "EMPRESTIMO":
+            flash(
+                "A movimentação inicial do empréstimo não pode ser excluída isoladamente. Ela representa a criação do contrato.",
+                "warning",
+            )
+            return redirect(url_for("emprestimos_detalhe", emprestimo_id=movimento["emprestimo_id"]))
+
+        if request.method == "POST":
+            senha = request.form.get("senha_confirmacao", "")
+            motivo = request.form.get("motivo_exclusao", "").strip()
+            errors: list[str] = []
+
+            if not validar_senha_usuario_atual(senha):
+                errors.append("A senha de confirmação do usuário logado é inválida.")
+            if len(motivo) < 5:
+                errors.append("Informe o motivo da exclusão com pelo menos 5 caracteres.")
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                db = get_db()
+                before = movimentacao_para_auditoria(movimento)
+                try:
+                    db.execute("DELETE FROM movimentacoes_emprestimo WHERE id = ?", (movimentacao_id,))
+
+                    if movimento["tipo"] in {"ABATIMENTO", "QUITACAO"}:
+                        saldo = recalcular_emprestimo_por_movimentacoes(
+                            db,
+                            int(movimento["emprestimo_id"]),
+                        )
+                    else:
+                        saldo_row = db.execute(
+                            "SELECT saldo_atual_centavos FROM emprestimos WHERE id = ?",
+                            (movimento["emprestimo_id"],),
+                        ).fetchone()
+                        saldo = int(saldo_row["saldo_atual_centavos"])
+
+                    registrar_auditoria(
+                        db, "movimentacao_emprestimo", movimentacao_id, "EXCLUIDA",
+                        json.dumps(
+                            {"motivo": motivo, "registro_excluido": before, "saldo_apos_recalculo_centavos": saldo},
+                            ensure_ascii=False, sort_keys=True,
+                        ),
+                    )
+                    db.commit()
+                except (sqlite3.DatabaseError, ValueError) as exc:
+                    db.rollback()
+                    app.logger.exception("Erro ao excluir movimentação")
+                    flash(f"A exclusão não foi gravada: {exc}", "danger")
+                else:
+                    flash("Movimentação excluída com sucesso. A exclusão foi registrada na auditoria.", "success")
+                    return redirect(url_for("emprestimos_detalhe", emprestimo_id=movimento["emprestimo_id"]))
+
+        return render_template("movimentacoes/excluir.html", movimento=movimento)
+
     @app.get("/movimentacoes")
     @login_required
     def movimentacoes_lista():
@@ -2525,15 +3018,22 @@ app = create_app()
 
 
 if __name__ == "__main__":
+    host = os.environ.get("EMPRESTIMO_HOST", "127.0.0.1")
+    port = int(os.environ.get("EMPRESTIMO_PORT", "5000"))
+    debug = env_bool("EMPRESTIMO_DEBUG", False)
+
     print()
     print("Sistema de Empréstimos")
     print("----------------------")
     print(f"Banco: {DATABASE_PATH}")
-    print("Acesse: http://127.0.0.1:5000")
+    print(f"Servidor: http://{host}:{port}")
+    print(f"Debug: {debug}")
     print()
 
+    # Uso direto com python app.py é destinado a desenvolvimento/testes.
+    # Produção Windows usa Waitress; hospedagens usam WSGI.
     app.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=True,
+        host=host,
+        port=port,
+        debug=debug,
     )

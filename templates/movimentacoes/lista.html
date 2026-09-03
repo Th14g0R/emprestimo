@@ -39,6 +39,7 @@
             <th class="text-right">Saldo depois</th>
             <th>Origem</th><th>Destino</th><th>Usuário</th>
             <th>Observação</th>
+            <th>Ações</th>
         </tr>
     </thead>
     <tbody>
@@ -56,6 +57,14 @@
             <td>{% if mov['destino_banco'] %}{{ mov['destino_banco'] }}{% if mov['destino_pix'] %}<br><small>PIX {{ mov['destino_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
             <td>{{ mov['usuario_nome'] or '-' }}</td>
             <td>{{ mov['observacao'] or '-' }}</td>
+            <td>
+                <div class="actions wrap-actions">
+                    <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=mov['id']) }}">Alterar</a>
+                    {% if mov['tipo'] != 'EMPRESTIMO' %}
+                    <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=mov['id']) }}">Excluir</a>
+                    {% endif %}
+                </div>
+            </td>
         </tr>
     {% endfor %}
     </tbody>
