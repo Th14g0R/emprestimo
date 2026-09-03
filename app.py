@@ -270,6 +270,80 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status);
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id);
 
+        CREATE TABLE IF NOT EXISTS pagamentos_integrados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id INTEGER NOT NULL,
+            data_pagamento TEXT NOT NULL,
+            valor_total_centavos INTEGER NOT NULL
+                CHECK (valor_total_centavos > 0),
+            conta_origem_id INTEGER NOT NULL,
+            conta_destino_id INTEGER NOT NULL,
+            origem_banco_snapshot TEXT,
+            origem_pix_snapshot TEXT,
+            destino_banco_snapshot TEXT,
+            destino_pix_snapshot TEXT,
+            observacao TEXT,
+            usuario_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (cliente_id)
+                REFERENCES clientes(id)
+                ON UPDATE CASCADE
+                ON DELETE RESTRICT,
+            FOREIGN KEY (conta_origem_id)
+                REFERENCES contas_bancarias(id)
+                ON UPDATE CASCADE
+                ON DELETE RESTRICT,
+            FOREIGN KEY (conta_destino_id)
+                REFERENCES contas_bancarias(id)
+                ON UPDATE CASCADE
+                ON DELETE RESTRICT,
+            FOREIGN KEY (usuario_id)
+                REFERENCES usuarios(id)
+                ON UPDATE CASCADE
+                ON DELETE SET NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS pagamentos_integrados_itens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pagamento_integrado_id INTEGER NOT NULL,
+            emprestimo_id INTEGER NOT NULL,
+            tipo TEXT NOT NULL DEFAULT 'JUROS'
+                CHECK (tipo IN ('JUROS')),
+            competencia TEXT NOT NULL,
+            valor_centavos INTEGER NOT NULL
+                CHECK (valor_centavos > 0),
+            saldo_base_centavos INTEGER NOT NULL
+                CHECK (saldo_base_centavos >= 0),
+            movimentacao_id INTEGER NOT NULL UNIQUE,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (pagamento_integrado_id)
+                REFERENCES pagamentos_integrados(id)
+                ON UPDATE CASCADE
+                ON DELETE CASCADE,
+            FOREIGN KEY (emprestimo_id)
+                REFERENCES emprestimos(id)
+                ON UPDATE CASCADE
+                ON DELETE RESTRICT,
+            FOREIGN KEY (movimentacao_id)
+                REFERENCES movimentacoes_emprestimo(id)
+                ON UPDATE CASCADE
+                ON DELETE RESTRICT,
+            UNIQUE (pagamento_integrado_id, emprestimo_id, competencia)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_cliente
+            ON pagamentos_integrados(cliente_id);
+
+        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_data
+            ON pagamentos_integrados(data_pagamento);
+
+        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_itens_pagamento
+            ON pagamentos_integrados_itens(pagamento_integrado_id);
+
+        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_itens_emprestimo
+            ON pagamentos_integrados_itens(emprestimo_id);
+
         CREATE TABLE IF NOT EXISTS cartoes_credito (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente_id INTEGER NOT NULL,
@@ -395,6 +469,7 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     add_column_if_missing(db, "movimentacoes_emprestimo", "destino_pix_snapshot", "TEXT")
     add_column_if_missing(db, "movimentacoes_emprestimo", "updated_at", "TEXT")
     add_column_if_missing(db, "movimentacoes_emprestimo", "usuario_ultima_alteracao_id", "INTEGER")
+    add_column_if_missing(db, "movimentacoes_emprestimo", "pagamento_integrado_id", "INTEGER")
     add_column_if_missing(db, "lancamentos_cartao", "usuario_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "conta_origem_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "conta_destino_id", "INTEGER")
@@ -404,6 +479,10 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     add_column_if_missing(db, "parcelas_cartao", "destino_pix_snapshot", "TEXT")
     add_column_if_missing(db, "parcelas_cartao", "usuario_pagamento_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "pagamento_observacao", "TEXT")
+
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_movimentacoes_pagamento_integrado ON movimentacoes_emprestimo(pagamento_integrado_id)"
+    )
 
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_movimentacoes_conta_origem ON movimentacoes_emprestimo(conta_origem_id)"
@@ -1052,6 +1131,85 @@ def validate_money_flow_accounts(
             errors.append("No recebimento, a conta de destino deve ser uma conta própria.")
 
     return errors
+
+
+def saldo_principal_antes_da_data(
+    db: sqlite3.Connection,
+    emprestimo_id: int,
+    data_referencia: date,
+) -> int:
+    """
+    Retorna o principal existente no início da data informada.
+
+    Para lançamento histórico de juros, abatimentos/quitações ocorridos em
+    datas anteriores reduzem a base. Movimentos do mesmo dia não são aplicados,
+    pois o fluxo usual é cobrar o juro sobre o saldo trazido para o dia.
+    """
+    emprestimo = db.execute(
+        """
+        SELECT valor_original_centavos, data_emprestimo
+          FROM emprestimos
+         WHERE id = ?
+        """,
+        (emprestimo_id,),
+    ).fetchone()
+
+    if emprestimo is None:
+        raise ValueError("Empréstimo não encontrado.")
+
+    if data_referencia < date.fromisoformat(emprestimo["data_emprestimo"]):
+        raise ValueError("A data do pagamento não pode ser anterior ao empréstimo.")
+
+    saldo = int(emprestimo["valor_original_centavos"])
+
+    movimentos = db.execute(
+        """
+        SELECT tipo, valor_centavos
+          FROM movimentacoes_emprestimo
+         WHERE emprestimo_id = ?
+           AND data_movimento < ?
+           AND tipo IN ('ABATIMENTO', 'QUITACAO')
+         ORDER BY data_movimento, id
+        """,
+        (emprestimo_id, data_referencia.isoformat()),
+    ).fetchall()
+
+    for movimento in movimentos:
+        if movimento["tipo"] == "ABATIMENTO":
+            saldo -= int(movimento["valor_centavos"])
+        elif movimento["tipo"] == "QUITACAO":
+            saldo = 0
+
+        if saldo <= 0:
+            return 0
+
+    return saldo
+
+
+def get_pagamento_integrado_or_404(pagamento_id: int) -> sqlite3.Row:
+    pagamento = get_db().execute(
+        """
+        SELECT p.*,
+               c.nome AS cliente_nome,
+               u.nome AS usuario_nome,
+               COALESCE(p.origem_banco_snapshot, co.banco) AS origem_banco,
+               COALESCE(p.origem_pix_snapshot, co.chave_pix) AS origem_pix,
+               COALESCE(p.destino_banco_snapshot, cd.banco) AS destino_banco,
+               COALESCE(p.destino_pix_snapshot, cd.chave_pix) AS destino_pix
+          FROM pagamentos_integrados p
+          JOIN clientes c ON c.id = p.cliente_id
+          LEFT JOIN usuarios u ON u.id = p.usuario_id
+          LEFT JOIN contas_bancarias co ON co.id = p.conta_origem_id
+          LEFT JOIN contas_bancarias cd ON cd.id = p.conta_destino_id
+         WHERE p.id = ?
+        """,
+        (pagamento_id,),
+    ).fetchone()
+
+    if pagamento is None:
+        abort(404)
+
+    return pagamento
 
 
 def get_movimentacao_or_404(movimentacao_id: int) -> sqlite3.Row:
@@ -2154,6 +2312,7 @@ def register_routes(app: Flask) -> None:
             """
             SELECT m.id, m.tipo, m.data_movimento, m.valor_centavos,
                    m.observacao, m.created_at, m.competencia,
+                   m.pagamento_integrado_id,
                    m.saldo_antes_centavos, m.saldo_depois_centavos,
                    m.conta_origem_id, m.conta_destino_id,
                    u.nome AS usuario_nome,
@@ -2544,12 +2703,632 @@ def register_routes(app: Flask) -> None:
             contas_proprias=contas_proprias,
         )
 
+    # -------------------- Pagamentos integrados --------------------
+
+    @app.get("/pagamentos-integrados")
+    @login_required
+    def pagamentos_integrados_lista():
+        termo = request.args.get("q", "").strip()
+        mes = request.args.get("mes", "").strip()
+
+        sql = """
+            SELECT p.id, p.data_pagamento, p.valor_total_centavos,
+                   p.observacao, p.created_at,
+                   c.id AS cliente_id, c.nome AS cliente_nome,
+                   u.nome AS usuario_nome,
+                   COUNT(i.id) AS quantidade_itens
+              FROM pagamentos_integrados p
+              JOIN clientes c ON c.id = p.cliente_id
+              LEFT JOIN usuarios u ON u.id = p.usuario_id
+              LEFT JOIN pagamentos_integrados_itens i
+                     ON i.pagamento_integrado_id = p.id
+             WHERE 1 = 1
+        """
+        params: list[Any] = []
+
+        if parse_competencia(mes) is not None:
+            sql += " AND substr(p.data_pagamento, 1, 7) = ?"
+            params.append(mes)
+
+        if termo:
+            like = f"%{termo}%"
+            sql += """
+                AND (
+                    c.nome LIKE ? COLLATE NOCASE
+                    OR CAST(p.id AS TEXT) LIKE ?
+                    OR p.observacao LIKE ? COLLATE NOCASE
+                )
+            """
+            params.extend([like, like, like])
+
+        sql += """
+            GROUP BY p.id
+            ORDER BY p.data_pagamento DESC, p.id DESC
+            LIMIT 500
+        """
+
+        pagamentos = get_db().execute(sql, params).fetchall()
+
+        return render_template(
+            "pagamentos_integrados/lista.html",
+            pagamentos=pagamentos,
+            termo=termo,
+            mes=mes,
+        )
+
+    @app.route("/pagamentos-integrados/novo", methods=["GET", "POST"])
+    @login_required
+    def pagamentos_integrados_novo():
+        db = get_db()
+
+        clientes = db.execute(
+            """
+            SELECT DISTINCT c.id, c.nome
+              FROM clientes c
+              JOIN emprestimos e ON e.cliente_id = c.id
+             ORDER BY c.nome COLLATE NOCASE
+            """
+        ).fetchall()
+
+        cliente_id = (
+            parse_int(request.form.get("cliente_id"))
+            if request.method == "POST"
+            else parse_int(request.args.get("cliente_id"))
+        )
+
+        cliente = None
+        emprestimos = []
+        contas_cliente = []
+        contas_proprias = get_own_accounts()
+
+        if cliente_id is not None:
+            cliente = db.execute(
+                "SELECT id, nome FROM clientes WHERE id = ?",
+                (cliente_id,),
+            ).fetchone()
+
+            if cliente is not None:
+                emprestimos = db.execute(
+                    """
+                    SELECT id, data_emprestimo, valor_original_centavos,
+                           saldo_atual_centavos, taxa_juros_mensal,
+                           status, descricao
+                      FROM emprestimos
+                     WHERE cliente_id = ?
+                     ORDER BY data_emprestimo, id
+                    """,
+                    (cliente_id,),
+                ).fetchall()
+                contas_cliente = get_client_accounts(cliente_id)
+
+        form = {
+            "cliente_id": cliente_id,
+            "data_pagamento": request.form.get(
+                "data_pagamento",
+                date.today().isoformat(),
+            ),
+            "valor_total": request.form.get("valor_total", ""),
+            "conta_origem_id": (
+                parse_int(request.form.get("conta_origem_id"))
+                if request.method == "POST"
+                else (contas_cliente[0]["id"] if contas_cliente else None)
+            ),
+            "conta_destino_id": (
+                parse_int(request.form.get("conta_destino_id"))
+                if request.method == "POST"
+                else (contas_proprias[0]["id"] if contas_proprias else None)
+            ),
+            "observacao": request.form.get("observacao", ""),
+        }
+
+        if request.method == "POST":
+            errors: list[str] = []
+
+            if cliente is None:
+                errors.append("Selecione um cliente válido.")
+
+            data_pagamento = parse_iso_date(form["data_pagamento"])
+            if data_pagamento is None:
+                errors.append("Informe uma data válida para o pagamento.")
+
+            valor_total_centavos = parse_money_to_centavos(form["valor_total"])
+            if valor_total_centavos is None or valor_total_centavos <= 0:
+                errors.append("Informe o valor total recebido.")
+
+            if cliente is not None:
+                errors.extend(
+                    validate_money_flow_accounts(
+                        cliente_id,
+                        form["conta_origem_id"],
+                        form["conta_destino_id"],
+                        is_loan_disbursement=False,
+                    )
+                )
+
+            selected_ids: list[int] = []
+            for value in request.form.getlist("emprestimo_id"):
+                parsed = parse_int(value)
+                if parsed is not None and parsed not in selected_ids:
+                    selected_ids.append(parsed)
+
+            if len(selected_ids) < 2:
+                errors.append(
+                    "Selecione pelo menos dois empréstimos para um pagamento integrado."
+                )
+
+            itens: list[dict[str, Any]] = []
+            total_rateado = 0
+
+            if cliente is not None and data_pagamento is not None:
+                loans_by_id = {int(row["id"]): row for row in emprestimos}
+
+                for emprestimo_id in selected_ids:
+                    loan = loans_by_id.get(emprestimo_id)
+
+                    if loan is None:
+                        errors.append(
+                            f"O empréstimo #{emprestimo_id} não pertence ao cliente selecionado."
+                        )
+                        continue
+
+                    competencia = parse_competencia(
+                        request.form.get(f"competencia_{emprestimo_id}", "")
+                    )
+                    valor_item = parse_money_to_centavos(
+                        request.form.get(f"valor_{emprestimo_id}", "")
+                    )
+
+                    if competencia is None:
+                        errors.append(
+                            f"Informe a competência dos juros do empréstimo #{emprestimo_id}."
+                        )
+                        continue
+
+                    if competencia < loan["data_emprestimo"][:7]:
+                        errors.append(
+                            f"A competência do empréstimo #{emprestimo_id} "
+                            "não pode ser anterior ao contrato."
+                        )
+                        continue
+
+                    if valor_item is None or valor_item <= 0:
+                        errors.append(
+                            f"Informe o valor de juros do empréstimo #{emprestimo_id}."
+                        )
+                        continue
+
+                    duplicate = db.execute(
+                        """
+                        SELECT id
+                          FROM movimentacoes_emprestimo
+                         WHERE emprestimo_id = ?
+                           AND tipo = 'JUROS'
+                           AND competencia = ?
+                         LIMIT 1
+                        """,
+                        (emprestimo_id, competencia),
+                    ).fetchone()
+
+                    if duplicate is not None:
+                        errors.append(
+                            f"O empréstimo #{emprestimo_id} já possui juros lançados "
+                            f"para {format_competencia_br(competencia)}."
+                        )
+                        continue
+
+                    try:
+                        saldo_base = saldo_principal_antes_da_data(
+                            db,
+                            emprestimo_id,
+                            data_pagamento,
+                        )
+                    except ValueError as exc:
+                        errors.append(str(exc))
+                        continue
+
+                    if saldo_base <= 0:
+                        errors.append(
+                            f"O empréstimo #{emprestimo_id} não possuía saldo "
+                            "devedor na data informada."
+                        )
+                        continue
+
+                    juros_esperado = calcular_juros_centavos(
+                        saldo_base,
+                        loan["taxa_juros_mensal"],
+                    )
+
+                    if valor_item != juros_esperado:
+                        errors.append(
+                            f"Empréstimo #{emprestimo_id}: o juro integral para "
+                            f"o saldo de {format_money(saldo_base)} e taxa de "
+                            f"{format_percent(loan['taxa_juros_mensal'])} é "
+                            f"{format_money(juros_esperado)}, não "
+                            f"{format_money(valor_item)}."
+                        )
+                        continue
+
+                    itens.append(
+                        {
+                            "emprestimo_id": emprestimo_id,
+                            "competencia": competencia,
+                            "valor_centavos": int(valor_item),
+                            "saldo_base_centavos": int(saldo_base),
+                            "taxa_juros_mensal": loan["taxa_juros_mensal"],
+                        }
+                    )
+                    total_rateado += int(valor_item)
+
+            if (
+                valor_total_centavos is not None
+                and valor_total_centavos > 0
+                and total_rateado != valor_total_centavos
+            ):
+                errors.append(
+                    "A soma dos rateios "
+                    f"({format_money(total_rateado)}) precisa ser exatamente igual "
+                    f"ao valor total recebido ({format_money(valor_total_centavos)})."
+                )
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                origem_banco, origem_pix, destino_banco, destino_pix = get_account_snapshots(
+                    form["conta_origem_id"],
+                    form["conta_destino_id"],
+                )
+
+                try:
+                    cursor = db.execute(
+                        """
+                        INSERT INTO pagamentos_integrados (
+                            cliente_id, data_pagamento, valor_total_centavos,
+                            conta_origem_id, conta_destino_id,
+                            origem_banco_snapshot, origem_pix_snapshot,
+                            destino_banco_snapshot, destino_pix_snapshot,
+                            observacao, usuario_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            cliente_id,
+                            data_pagamento.isoformat(),
+                            valor_total_centavos,
+                            form["conta_origem_id"],
+                            form["conta_destino_id"],
+                            origem_banco,
+                            origem_pix,
+                            destino_banco,
+                            destino_pix,
+                            normalize_optional(form["observacao"]),
+                            g.usuario["id"],
+                        ),
+                    )
+                    pagamento_id = int(cursor.lastrowid)
+
+                    auditoria_itens: list[dict[str, Any]] = []
+
+                    for item in itens:
+                        observacao_movimento = f"Pagamento integrado #{pagamento_id}"
+                        if normalize_optional(form["observacao"]):
+                            observacao_movimento += f" — {normalize_optional(form['observacao'])}"
+
+                        cursor_mov = db.execute(
+                            """
+                            INSERT INTO movimentacoes_emprestimo (
+                                emprestimo_id, tipo, data_movimento,
+                                valor_centavos, observacao, competencia,
+                                usuario_id, saldo_antes_centavos,
+                                saldo_depois_centavos,
+                                conta_origem_id, conta_destino_id,
+                                origem_banco_snapshot, origem_pix_snapshot,
+                                destino_banco_snapshot, destino_pix_snapshot,
+                                pagamento_integrado_id
+                            ) VALUES (
+                                ?, 'JUROS', ?, ?, ?, ?, ?, ?, ?,
+                                ?, ?, ?, ?, ?, ?, ?
+                            )
+                            """,
+                            (
+                                item["emprestimo_id"],
+                                data_pagamento.isoformat(),
+                                item["valor_centavos"],
+                                observacao_movimento,
+                                item["competencia"],
+                                g.usuario["id"],
+                                item["saldo_base_centavos"],
+                                item["saldo_base_centavos"],
+                                form["conta_origem_id"],
+                                form["conta_destino_id"],
+                                origem_banco,
+                                origem_pix,
+                                destino_banco,
+                                destino_pix,
+                                pagamento_id,
+                            ),
+                        )
+                        movimento_id = int(cursor_mov.lastrowid)
+
+                        db.execute(
+                            """
+                            INSERT INTO pagamentos_integrados_itens (
+                                pagamento_integrado_id, emprestimo_id,
+                                tipo, competencia, valor_centavos,
+                                saldo_base_centavos, movimentacao_id
+                            ) VALUES (?, ?, 'JUROS', ?, ?, ?, ?)
+                            """,
+                            (
+                                pagamento_id,
+                                item["emprestimo_id"],
+                                item["competencia"],
+                                item["valor_centavos"],
+                                item["saldo_base_centavos"],
+                                movimento_id,
+                            ),
+                        )
+
+                        # Se a agenda já possui o título correspondente,
+                        # transforma a previsão em recebimento real.
+                        db.execute(
+                            """
+                            UPDATE titulos_receber
+                               SET status = 'RECEBIDO',
+                                   movimentacao_id = ?,
+                                   data_recebimento = ?,
+                                   updated_at = CURRENT_TIMESTAMP
+                             WHERE emprestimo_id = ?
+                               AND tipo = 'JUROS'
+                               AND competencia = ?
+                            """,
+                            (
+                                movimento_id,
+                                data_pagamento.isoformat(),
+                                item["emprestimo_id"],
+                                item["competencia"],
+                            ),
+                        )
+
+                        auditoria_itens.append(
+                            {
+                                **item,
+                                "movimentacao_id": movimento_id,
+                            }
+                        )
+
+                    registrar_auditoria(
+                        db,
+                        "pagamento_integrado",
+                        pagamento_id,
+                        "CRIADO",
+                        json.dumps(
+                            {
+                                "cliente_id": cliente_id,
+                                "data_pagamento": data_pagamento.isoformat(),
+                                "valor_total_centavos": valor_total_centavos,
+                                "itens": auditoria_itens,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                    )
+
+                    # Um único COMMIT torna o pagamento e todos os rateios atômicos.
+                    db.commit()
+
+                except (sqlite3.DatabaseError, ValueError) as exc:
+                    db.rollback()
+                    app.logger.exception("Erro ao registrar pagamento integrado")
+                    flash(
+                        f"O pagamento integrado não foi gravado: {exc}",
+                        "danger",
+                    )
+                else:
+                    flash(
+                        f"Pagamento integrado #{pagamento_id} registrado. "
+                        f"{len(itens)} empréstimos receberam seus juros.",
+                        "success",
+                    )
+                    return redirect(
+                        url_for(
+                            "pagamentos_integrados_detalhe",
+                            pagamento_id=pagamento_id,
+                        )
+                    )
+
+        # Valores para redisplay / preenchimento inicial.
+        default_competencia = form["data_pagamento"][:7] if len(form["data_pagamento"]) >= 7 else date.today().strftime("%Y-%m")
+
+        linhas_form: dict[int, dict[str, Any]] = {}
+        for loan in emprestimos:
+            loan_id = int(loan["id"])
+            linhas_form[loan_id] = {
+                "selected": str(loan_id) in request.form.getlist("emprestimo_id"),
+                "competencia": request.form.get(
+                    f"competencia_{loan_id}",
+                    default_competencia,
+                ),
+                "valor": request.form.get(
+                    f"valor_{loan_id}",
+                    format_money(
+                        calcular_juros_centavos(
+                            loan["saldo_atual_centavos"],
+                            loan["taxa_juros_mensal"],
+                        )
+                    ).replace("R$ ", ""),
+                ),
+            }
+
+        return render_template(
+            "pagamentos_integrados/form.html",
+            clientes=clientes,
+            cliente=cliente,
+            emprestimos=emprestimos,
+            contas_cliente=contas_cliente,
+            contas_proprias=contas_proprias,
+            form=form,
+            linhas_form=linhas_form,
+        )
+
+    @app.get("/pagamentos-integrados/<int:pagamento_id>")
+    @login_required
+    def pagamentos_integrados_detalhe(pagamento_id: int):
+        pagamento = get_pagamento_integrado_or_404(pagamento_id)
+        itens = get_db().execute(
+            """
+            SELECT i.id, i.emprestimo_id, i.competencia,
+                   i.valor_centavos, i.saldo_base_centavos,
+                   i.movimentacao_id,
+                   e.taxa_juros_mensal, e.descricao
+              FROM pagamentos_integrados_itens i
+              JOIN emprestimos e ON e.id = i.emprestimo_id
+             WHERE i.pagamento_integrado_id = ?
+             ORDER BY i.id
+            """,
+            (pagamento_id,),
+        ).fetchall()
+
+        return render_template(
+            "pagamentos_integrados/detalhe.html",
+            pagamento=pagamento,
+            itens=itens,
+        )
+
+    @app.route(
+        "/pagamentos-integrados/<int:pagamento_id>/excluir",
+        methods=["GET", "POST"],
+    )
+    @login_required
+    def pagamentos_integrados_excluir(pagamento_id: int):
+        pagamento = get_pagamento_integrado_or_404(pagamento_id)
+        db = get_db()
+
+        itens = db.execute(
+            """
+            SELECT i.*, m.data_movimento
+              FROM pagamentos_integrados_itens i
+              JOIN movimentacoes_emprestimo m ON m.id = i.movimentacao_id
+             WHERE i.pagamento_integrado_id = ?
+             ORDER BY i.id
+            """,
+            (pagamento_id,),
+        ).fetchall()
+
+        if request.method == "POST":
+            senha = request.form.get("senha_confirmacao", "")
+            motivo = request.form.get("motivo_exclusao", "").strip()
+            errors: list[str] = []
+
+            if not validar_senha_usuario_atual(senha):
+                errors.append("A senha de confirmação do usuário logado é inválida.")
+
+            if len(motivo) < 5:
+                errors.append(
+                    "Informe o motivo da exclusão com pelo menos 5 caracteres."
+                )
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                snapshot = {
+                    "pagamento": dict(pagamento),
+                    "itens": [dict(item) for item in itens],
+                    "motivo": motivo,
+                }
+
+                try:
+                    for item in itens:
+                        db.execute(
+                            """
+                            UPDATE titulos_receber
+                               SET status = CASE
+                                       WHEN data_vencimento < date('now')
+                                       THEN 'VENCIDO'
+                                       ELSE 'PREVISTO'
+                                   END,
+                                   movimentacao_id = NULL,
+                                   data_recebimento = NULL,
+                                   updated_at = CURRENT_TIMESTAMP
+                             WHERE movimentacao_id = ?
+                            """,
+                            (item["movimentacao_id"],),
+                        )
+
+                    db.execute(
+                        """
+                        DELETE FROM pagamentos_integrados_itens
+                         WHERE pagamento_integrado_id = ?
+                        """,
+                        (pagamento_id,),
+                    )
+                    db.execute(
+                        """
+                        DELETE FROM movimentacoes_emprestimo
+                         WHERE pagamento_integrado_id = ?
+                        """,
+                        (pagamento_id,),
+                    )
+                    db.execute(
+                        "DELETE FROM pagamentos_integrados WHERE id = ?",
+                        (pagamento_id,),
+                    )
+
+                    registrar_auditoria(
+                        db,
+                        "pagamento_integrado",
+                        pagamento_id,
+                        "EXCLUIDO",
+                        json.dumps(
+                            snapshot,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            default=str,
+                        ),
+                    )
+
+                    db.commit()
+
+                except sqlite3.DatabaseError as exc:
+                    db.rollback()
+                    app.logger.exception("Erro ao excluir pagamento integrado")
+                    flash(
+                        f"O pagamento integrado não foi excluído: {exc}",
+                        "danger",
+                    )
+                else:
+                    flash(
+                        f"Pagamento integrado #{pagamento_id} excluído. "
+                        "Os lançamentos de juros vinculados também foram removidos.",
+                        "success",
+                    )
+                    return redirect(url_for("pagamentos_integrados_lista"))
+
+        return render_template(
+            "pagamentos_integrados/excluir.html",
+            pagamento=pagamento,
+            itens=itens,
+        )
+
+
     # -------------------- Movimentações --------------------
 
     @app.route("/movimentacoes/<int:movimentacao_id>/editar", methods=["GET", "POST"])
     @login_required
     def movimentacoes_editar(movimentacao_id: int):
         movimento = get_movimentacao_or_404(movimentacao_id)
+
+        if movimento["pagamento_integrado_id"] is not None:
+            flash(
+                "Esta movimentação faz parte de um pagamento integrado. "
+                "Para preservar o fechamento do pagamento, abra o pagamento integrado.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "pagamentos_integrados_detalhe",
+                    pagamento_id=movimento["pagamento_integrado_id"],
+                )
+            )
         emprestimo = get_emprestimo_or_404(movimento["emprestimo_id"])
         contas_cliente = get_client_accounts(emprestimo["cliente_id"])
         contas_proprias = get_own_accounts()
@@ -2719,6 +3498,19 @@ def register_routes(app: Flask) -> None:
     def movimentacoes_excluir(movimentacao_id: int):
         movimento = get_movimentacao_or_404(movimentacao_id)
 
+        if movimento["pagamento_integrado_id"] is not None:
+            flash(
+                "Esta movimentação faz parte de um pagamento integrado e não pode "
+                "ser excluída isoladamente. Exclua o pagamento integrado completo.",
+                "warning",
+            )
+            return redirect(
+                url_for(
+                    "pagamentos_integrados_detalhe",
+                    pagamento_id=movimento["pagamento_integrado_id"],
+                )
+            )
+
         if movimento["tipo"] == "EMPRESTIMO":
             flash(
                 "A movimentação inicial do empréstimo não pode ser excluída isoladamente. Ela representa a criação do contrato.",
@@ -2786,7 +3578,7 @@ def register_routes(app: Flask) -> None:
 
         sql = """
             SELECT m.id, m.tipo, m.data_movimento, m.valor_centavos,
-                   m.observacao, m.competencia,
+                   m.observacao, m.competencia, m.pagamento_integrado_id,
                    m.saldo_antes_centavos, m.saldo_depois_centavos,
                    e.id AS emprestimo_id, c.id AS cliente_id, c.nome AS cliente_nome,
                    u.nome AS usuario_nome,

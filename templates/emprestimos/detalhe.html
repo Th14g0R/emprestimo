@@ -97,12 +97,21 @@
                         <td>{% if movimento['origem_banco'] %}{{ movimento['origem_banco'] }}{% if movimento['origem_pix'] %}<br><small>PIX {{ movimento['origem_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
                         <td>{% if movimento['destino_banco'] %}{{ movimento['destino_banco'] }}{% if movimento['destino_pix'] %}<br><small>PIX {{ movimento['destino_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
                         <td>{{ movimento['usuario_nome'] or '-' }}</td>
-                        <td>{{ movimento['observacao'] or '-' }}</td>
+                        <td>
+                            {{ movimento['observacao'] or '-' }}
+                            {% if movimento['pagamento_integrado_id'] %}
+                                <br><a class="integrated-payment-link" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=movimento['pagamento_integrado_id']) }}">Pagamento integrado #{{ movimento['pagamento_integrado_id'] }}</a>
+                            {% endif %}
+                        </td>
                         <td>
                             <div class="actions wrap-actions">
-                                <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=movimento['id']) }}">Alterar</a>
-                                {% if movimento['tipo'] != 'EMPRESTIMO' %}
-                                <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=movimento['id']) }}">Excluir</a>
+                                {% if movimento['pagamento_integrado_id'] %}
+                                    <a class="button button-secondary button-small" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=movimento['pagamento_integrado_id']) }}">Abrir integrado</a>
+                                {% else %}
+                                    <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=movimento['id']) }}">Alterar</a>
+                                    {% if movimento['tipo'] != 'EMPRESTIMO' %}
+                                    <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=movimento['id']) }}">Excluir</a>
+                                    {% endif %}
                                 {% endif %}
                             </div>
                         </td>

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Pagamentos integrados{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Pagamentos integrados</h1>
+        <p class="muted">Uma única transferência distribuída entre juros de vários empréstimos do mesmo cliente.</p>
+    </div>
+    <a class="button" href="{{ url_for('pagamentos_integrados_novo') }}">Novo pagamento integrado</a>
+</div>
+
+<section class="card section-card">
+    <form class="filters filters-movements" method="get">
+        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, número ou observação">
+        <input type="month" name="mes" value="{{ mes }}">
+        <button class="button button-secondary" type="submit">Filtrar</button>
+    </form>
+</section>
+
+<section class="card table-card">
+{% if pagamentos %}
+<div class="table-responsive">
+<table>
+    <thead>
+        <tr>
+            <th>Data</th>
+            <th>#</th>
+            <th>Cliente</th>
+            <th class="text-right">Valor recebido</th>
+            <th>Empréstimos</th>
+            <th>Usuário</th>
+            <th>Observação</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for p in pagamentos %}
+        <tr>
+            <td>{{ p['data_pagamento']|date_br }}</td>
+            <td>#{{ p['id'] }}</td>
+            <td>{{ p['cliente_nome'] }}</td>
+            <td class="text-right"><strong>{{ p['valor_total_centavos']|money }}</strong></td>
+            <td>{{ p['quantidade_itens'] }}</td>
+            <td>{{ p['usuario_nome'] or '-' }}</td>
+            <td>{{ p['observacao'] or '-' }}</td>
+            <td><a class="button button-small" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=p['id']) }}">Abrir</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}
+<div class="empty-state">Nenhum pagamento integrado encontrado.</div>
+{% endif %}
+</section>
+{% endblock %}

@@ -6,6 +6,7 @@
         <h1>Movimentações</h1>
         <p class="muted">Histórico financeiro consolidado dos empréstimos.</p>
     </div>
+    <a class="button" href="{{ url_for('pagamentos_integrados_novo') }}">Novo pagamento integrado</a>
 </div>
 
 <section class="card section-card">
@@ -56,12 +57,21 @@
             <td>{% if mov['origem_banco'] %}{{ mov['origem_banco'] }}{% if mov['origem_pix'] %}<br><small>PIX {{ mov['origem_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
             <td>{% if mov['destino_banco'] %}{{ mov['destino_banco'] }}{% if mov['destino_pix'] %}<br><small>PIX {{ mov['destino_pix'] }}</small>{% endif %}{% else %}-{% endif %}</td>
             <td>{{ mov['usuario_nome'] or '-' }}</td>
-            <td>{{ mov['observacao'] or '-' }}</td>
+            <td>
+                {{ mov['observacao'] or '-' }}
+                {% if mov['pagamento_integrado_id'] %}
+                    <br><a class="integrated-payment-link" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">Pagamento integrado #{{ mov['pagamento_integrado_id'] }}</a>
+                {% endif %}
+            </td>
             <td>
                 <div class="actions wrap-actions">
-                    <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=mov['id']) }}">Alterar</a>
-                    {% if mov['tipo'] != 'EMPRESTIMO' %}
-                    <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=mov['id']) }}">Excluir</a>
+                    {% if mov['pagamento_integrado_id'] %}
+                        <a class="button button-secondary button-small" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">Abrir integrado</a>
+                    {% else %}
+                        <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=mov['id']) }}">Alterar</a>
+                        {% if mov['tipo'] != 'EMPRESTIMO' %}
+                        <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=mov['id']) }}">Excluir</a>
+                        {% endif %}
                     {% endif %}
                 </div>
             </td>

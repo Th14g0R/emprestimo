@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Excluir pagamento integrado #{{ pagamento['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Excluir pagamento integrado #{{ pagamento['id'] }}</h1>
+        <p class="muted">A exclusão remove também todas as movimentações de juros vinculadas.</p>
+    </div>
+</div>
+
+<section class="card section-card danger-zone-card">
+    <div class="alert alert-danger">
+        <strong>Atenção:</strong>
+        {{ pagamento['valor_total_centavos']|money }} será removido do histórico,
+        incluindo {{ itens|length }} movimentações de juros.
+    </div>
+
+    <ul class="integrated-delete-items">
+        {% for item in itens %}
+        <li>
+            Empréstimo #{{ item['emprestimo_id'] }} —
+            {{ item['competencia']|competencia_br }} —
+            {{ item['valor_centavos']|money }}
+        </li>
+        {% endfor %}
+    </ul>
+
+    <form method="post" class="form-grid">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label class="field-span-2">
+            Motivo da exclusão
+            <textarea name="motivo_exclusao" rows="4" required minlength="5" placeholder="Explique por que este pagamento integrado está sendo removido"></textarea>
+        </label>
+
+        <label class="field-span-2">
+            Confirme sua senha
+            <input type="password" name="senha_confirmacao" required autocomplete="current-password">
+        </label>
+
+        <div class="form-actions field-span-2">
+            <a class="button button-light" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=pagamento['id']) }}">Cancelar</a>
+            <button class="button button-danger" type="submit">Excluir pagamento e rateios</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

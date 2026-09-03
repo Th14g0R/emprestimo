@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Novo pagamento integrado{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Novo pagamento integrado</h1>
+        <p class="muted">Registre uma única transferência e distribua os juros entre vários empréstimos do mesmo cliente.</p>
+    </div>
+    <a class="button button-light" href="{{ url_for('pagamentos_integrados_lista') }}">Voltar</a>
+</div>
+
+<section class="card section-card">
+    <h2>1. Cliente</h2>
+    <form method="get" class="filters integrated-client-selector">
+        <select name="cliente_id" required>
+            <option value="">Selecione o cliente...</option>
+            {% for c in clientes %}
+                <option value="{{ c['id'] }}" {{ 'selected' if cliente and cliente['id'] == c['id'] }}>{{ c['nome'] }}</option>
+            {% endfor %}
+        </select>
+        <button class="button button-secondary" type="submit">Carregar empréstimos</button>
+    </form>
+</section>
+
+{% if cliente %}
+<form method="post" id="integrated-payment-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="cliente_id" value="{{ cliente['id'] }}">
+
+    <section class="card section-card">
+        <h2>2. Pagamento recebido</h2>
+        <div class="form-grid">
+            <label>
+                Data do pagamento
+                <input type="date" name="data_pagamento" id="integrated-date" value="{{ form['data_pagamento'] }}" required>
+            </label>
+
+            <label>
+                Valor total recebido
+                <input type="text" name="valor_total" id="integrated-total" value="{{ form['valor_total'] }}" inputmode="decimal" placeholder="2.000,00" required>
+            </label>
+
+            <label>
+                Saiu da conta do cliente
+                <select name="conta_origem_id" required>
+                    <option value="">Selecione...</option>
+                    {% for conta in contas_cliente %}
+                        <option value="{{ conta['id'] }}" {{ 'selected' if form['conta_origem_id'] == conta['id'] }}>
+                            {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label>
+                Você recebeu em qual conta?
+                <select name="conta_destino_id" required>
+                    <option value="">Selecione...</option>
+                    {% for conta in contas_proprias %}
+                        <option value="{{ conta['id'] }}" {{ 'selected' if form['conta_destino_id'] == conta['id'] }}>
+                            {{ conta['banco'] }}{% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}{% if conta['chave_pix'] %} — PIX {{ conta['chave_pix'] }}{% endif %}
+                        </option>
+                    {% endfor %}
+                </select>
+            </label>
+
+            <label class="field-span-2">
+                Observação
+                <textarea name="observacao" rows="3" maxlength="500" placeholder="Ex.: PIX único referente aos juros dos contratos 1, 2 e 3">{{ form['observacao'] }}</textarea>
+            </label>
+        </div>
+    </section>
+
+    <section class="card section-card">
+        <div class="section-title-row">
+            <div>
+                <h2>3. Distribuição por empréstimo</h2>
+                <p class="muted section-subtitle">Selecione no mínimo dois contratos. Cada item vira uma movimentação JUROS no histórico daquele empréstimo.</p>
+            </div>
+            <div class="integrated-sum-box">
+                <small>Soma selecionada</small>
+                <strong id="integrated-sum">R$ 0,00</strong>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+        <table class="integrated-payment-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Empréstimo</th>
+                    <th>Data</th>
+                    <th>Status atual</th>
+                    <th class="text-right">Saldo atual</th>
+                    <th>Taxa</th>
+                    <th>Competência</th>
+                    <th>Juros deste pagamento</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for loan in emprestimos %}
+                {% set linha = linhas_form[loan['id']] %}
+                <tr>
+                    <td>
+                        <input class="integrated-check" type="checkbox" name="emprestimo_id" value="{{ loan['id'] }}" {{ 'checked' if linha['selected'] }}>
+                    </td>
+                    <td>
+                        <strong>#{{ loan['id'] }}</strong>
+                        {% if loan['descricao'] %}<br><small>{{ loan['descricao'] }}</small>{% endif %}
+                    </td>
+                    <td>{{ loan['data_emprestimo']|date_br }}</td>
+                    <td><span class="badge badge-{{ loan['status']|lower }}">{{ loan['status'] }}</span></td>
+                    <td class="text-right">{{ loan['saldo_atual_centavos']|money }}</td>
+                    <td>{{ loan['taxa_juros_mensal']|percent_br }}</td>
+                    <td>
+                        <input class="integrated-competence" type="month" name="competencia_{{ loan['id'] }}" value="{{ linha['competencia'] }}">
+                    </td>
+                    <td>
+                        <input class="integrated-value" type="text" name="valor_{{ loan['id'] }}" value="{{ linha['valor'] }}" inputmode="decimal">
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+
+        <div class="info-box integrated-info">
+            <strong>Validação financeira</strong>
+            <p>
+                Para cada contrato o sistema reconstrói o saldo principal existente antes da data informada
+                e exige o juro integral correspondente à taxa do empréstimo.
+            </p>
+        </div>
+
+        <div class="form-actions">
+            <a class="button button-light" href="{{ url_for('pagamentos_integrados_lista') }}">Cancelar</a>
+            <button class="button" type="submit">Registrar pagamento integrado</button>
+        </div>
+    </section>
+</form>
+
+<script>
+(() => {
+    const root = document.getElementById('integrated-payment-form');
+    if (!root) return;
+
+    const checks = [...root.querySelectorAll('.integrated-check')];
+    const sumNode = document.getElementById('integrated-sum');
+
+    const parseBR = (value) => {
+        let text = String(value || '').trim().replace(/\s/g, '').replace('R$', '');
+        if (!text) return 0;
+        if (text.includes(',')) {
+            text = text.replace(/\./g, '').replace(',', '.');
+        }
+        const number = Number(text);
+        return Number.isFinite(number) ? number : 0;
+    };
+
+    const formatBRL = (value) => value.toLocaleString('pt-BR', {
+        style: 'currency',
+        currency: 'BRL'
+    });
+
+    const updateSum = () => {
+        let total = 0;
+        for (const check of checks) {
+            const row = check.closest('tr');
+            const value = row.querySelector('.integrated-value');
+            const enabled = check.checked;
+            value.disabled = false;
+            row.classList.toggle('integrated-selected-row', enabled);
+            if (enabled) total += parseBR(value.value);
+        }
+        sumNode.textContent = formatBRL(total);
+    };
+
+    root.addEventListener('input', updateSum);
+    root.addEventListener('change', updateSum);
+    updateSum();
+})();
+</script>
+{% endif %}
+{% endblock %}

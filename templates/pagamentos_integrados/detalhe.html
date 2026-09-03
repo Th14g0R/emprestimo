@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Pagamento integrado #{{ pagamento['id'] }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Pagamento integrado #{{ pagamento['id'] }}</h1>
+        <p class="muted">Uma transferência bancária, distribuída entre vários empréstimos.</p>
+    </div>
+    <div class="actions">
+        <a class="button button-light" href="{{ url_for('pagamentos_integrados_lista') }}">Voltar</a>
+        <a class="button button-danger" href="{{ url_for('pagamentos_integrados_excluir', pagamento_id=pagamento['id']) }}">Excluir</a>
+    </div>
+</div>
+
+<div class="financial-operation-grid">
+<section class="card section-card">
+    <h2>Pagamento</h2>
+    <dl class="details">
+        <dt>Cliente</dt><dd>{{ pagamento['cliente_nome'] }}</dd>
+        <dt>Data</dt><dd>{{ pagamento['data_pagamento']|date_br }}</dd>
+        <dt>Valor recebido</dt><dd><strong>{{ pagamento['valor_total_centavos']|money }}</strong></dd>
+        <dt>Origem</dt>
+        <dd>{{ pagamento['origem_banco'] or '-' }}{% if pagamento['origem_pix'] %}<br><small>PIX {{ pagamento['origem_pix'] }}</small>{% endif %}</dd>
+        <dt>Destino</dt>
+        <dd>{{ pagamento['destino_banco'] or '-' }}{% if pagamento['destino_pix'] %}<br><small>PIX {{ pagamento['destino_pix'] }}</small>{% endif %}</dd>
+        <dt>Usuário</dt><dd>{{ pagamento['usuario_nome'] or '-' }}</dd>
+        <dt>Observação</dt><dd>{{ pagamento['observacao'] or '-' }}</dd>
+    </dl>
+</section>
+
+<section class="card section-card">
+    <h2>Rateio</h2>
+    {% if itens %}
+    <div class="table-responsive">
+    <table>
+        <thead>
+            <tr>
+                <th>Empréstimo</th>
+                <th>Competência</th>
+                <th>Saldo base</th>
+                <th>Taxa</th>
+                <th class="text-right">Juros</th>
+                <th>Movimentação</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for item in itens %}
+            <tr>
+                <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=item['emprestimo_id']) }}">#{{ item['emprestimo_id'] }}</a></td>
+                <td>{{ item['competencia']|competencia_br }}</td>
+                <td>{{ item['saldo_base_centavos']|money }}</td>
+                <td>{{ item['taxa_juros_mensal']|percent_br }}</td>
+                <td class="text-right"><strong>{{ item['valor_centavos']|money }}</strong></td>
+                <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=item['emprestimo_id']) }}#movimentacoes">#{{ item['movimentacao_id'] }}</a></td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+
+    <div class="calculation-box">
+        <span>Total distribuído</span>
+        <strong>{{ pagamento['valor_total_centavos']|money }}</strong>
+        <small>O total é a soma exata das movimentações de juros vinculadas.</small>
+    </div>
+</section>
+</div>
+{% endblock %}
