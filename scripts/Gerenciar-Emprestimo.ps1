@@ -17,6 +17,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+$Script:InstallerVersion = '5.0-python-detection-fix'
 $Script:RepoUrl = 'https://github.com/Th14g0R/emprestimo.git'
 $Script:Branch = 'main'
 $Script:ServiceName = 'Emprestimo'
@@ -65,6 +66,101 @@ function Ask-YesNo {
         if ($answer -in @('s', 'sim', 'y', 'yes')) { return $true }
         if ($answer -in @('n', 'nao', 'não', 'no')) { return $false }
         Write-Warn 'Responda S ou N.'
+    }
+}
+
+
+function Select-InstallFolder {
+    param(
+        [string]$SuggestedBasePath = $env:SystemDrive
+    )
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        [System.Windows.Forms.Application]::EnableVisualStyles()
+
+        $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $dialog.Description = @"
+Selecione a pasta BASE onde o Sistema Emprestimo será instalado.
+
+Exemplo:
+Se você selecionar D:\Sistemas,
+o sistema será instalado em D:\Sistemas\Emprestimo.
+"@
+        $dialog.ShowNewFolderButton = $true
+
+        if (-not [string]::IsNullOrWhiteSpace($SuggestedBasePath) -and
+            (Test-Path -LiteralPath $SuggestedBasePath)) {
+            $dialog.SelectedPath = $SuggestedBasePath
+        }
+        elseif (Test-Path -LiteralPath $env:SystemDrive) {
+            $dialog.SelectedPath = $env:SystemDrive
+        }
+
+        $result = $dialog.ShowDialog()
+
+        if ($result -ne [System.Windows.Forms.DialogResult]::OK) {
+            return $null
+        }
+
+        $selected = [IO.Path]::GetFullPath($dialog.SelectedPath.Trim())
+
+        # Se o usuário já selecionou uma pasta chamada Emprestimo, usa a própria pasta.
+        # Caso contrário, cria a subpasta Emprestimo, evitando misturar o sistema
+        # com outros arquivos existentes na pasta base selecionada.
+        $leaf = Split-Path -Leaf $selected
+        $target = if ($leaf -ieq 'Emprestimo') {
+            $selected
+        }
+        else {
+            Join-Path $selected 'Emprestimo'
+        }
+
+        $message = @"
+O Sistema Emprestimo será instalado em:
+
+$target
+
+O código será baixado de:
+https://github.com/Th14g0R/emprestimo
+
+Deseja continuar?
+"@
+
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            $message,
+            'Instalação - Sistema Emprestimo',
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+
+        if ($confirm -ne [System.Windows.Forms.DialogResult]::Yes) {
+            return $null
+        }
+
+        return [IO.Path]::GetFullPath($target)
+    }
+    catch {
+        Write-Warn "Não foi possível abrir o seletor gráfico de pasta: $($_.Exception.Message)"
+        Write-Warn 'Será utilizada a seleção de pasta pelo terminal.'
+
+        $entered = Read-Host "Pasta base para instalação [$env:SystemDrive\]"
+        $base = if ([string]::IsNullOrWhiteSpace($entered)) {
+            "$env:SystemDrive\"
+        }
+        else {
+            $entered.Trim()
+        }
+
+        $base = [IO.Path]::GetFullPath($base)
+        $leaf = Split-Path -Leaf $base
+
+        if ($leaf -ieq 'Emprestimo') {
+            return $base
+        }
+
+        return (Join-Path $base 'Emprestimo')
     }
 }
 
@@ -140,18 +236,49 @@ function Resolve-Git {
 }
 
 function Test-PythonCandidate {
-    param([string]$Executable, [string[]]$PrefixArgs = @())
+    param(
+        [Parameter(Mandatory)] [string]$Executable,
+        [string[]]$PrefixArgs = @()
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Executable)) {
+        return $null
+    }
 
     try {
-        $script = 'import sys; print(sys.executable); print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")'
-        $result = & $Executable @PrefixArgs -c $script 2>$null
-        if ($LASTEXITCODE -ne 0 -or $result.Count -lt 2) { return $null }
+        # Get-Command também pode devolver alias da Microsoft Store.
+        # Para caminhos físicos, valida antes de executar.
+        if ([IO.Path]::IsPathRooted($Executable) -and -not (Test-Path -LiteralPath $Executable)) {
+            return $null
+        }
 
-        $version = [Version]$result[-1]
-        if ($version -lt [Version]'3.9.0') { return $null }
+        $script = @'
+import sys
+print(sys.executable)
+print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+'@
+
+        $result = @(& $Executable @PrefixArgs -c $script 2>$null)
+
+        if ($LASTEXITCODE -ne 0 -or $result.Count -lt 2) {
+            return $null
+        }
+
+        $exePath = [string]$result[-2]
+        $versionText = [string]$result[-1]
+
+        $version = $null
+        if (-not [Version]::TryParse($versionText.Trim(), [ref]$version)) {
+            return $null
+        }
+
+        # Flask 3.1 suporta Python >= 3.9.
+        if ($version -lt [Version]'3.9.0') {
+            return $null
+        }
 
         return [PSCustomObject]@{
-            Exe = $result[0]
+            Exe = [IO.Path]::GetFullPath($exePath.Trim())
             Version = $version
         }
     }
@@ -160,37 +287,198 @@ function Test-PythonCandidate {
     }
 }
 
-function Resolve-Python {
-    $python = Get-Command 'python.exe' -ErrorAction SilentlyContinue
-    if ($python) {
-        $candidate = Test-PythonCandidate -Executable $python.Source
-        if ($candidate) { return $candidate }
+function Get-PythonFromRegistry {
+    # O instalador oficial do CPython registra instalações conforme PEP 514.
+    # Consultamos usuário atual e máquina, 64 e 32 bits.
+    $roots = @(
+        'HKCU:\SOFTWARE\Python\PythonCore',
+        'HKLM:\SOFTWARE\Python\PythonCore',
+        'HKLM:\SOFTWARE\WOW6432Node\Python\PythonCore'
+    )
+
+    $found = New-Object System.Collections.Generic.List[string]
+
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root)) {
+            continue
+        }
+
+        foreach ($versionKey in Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue) {
+            $installPathKey = Join-Path $versionKey.PSPath 'InstallPath'
+
+            if (-not (Test-Path -LiteralPath $installPathKey)) {
+                continue
+            }
+
+            try {
+                $key = Get-Item -LiteralPath $installPathKey -ErrorAction Stop
+
+                # Valor padrão do InstallPath.
+                $installDir = $key.GetValue('')
+
+                if (-not [string]::IsNullOrWhiteSpace($installDir)) {
+                    $candidate = Join-Path ([string]$installDir) 'python.exe'
+                    if (Test-Path -LiteralPath $candidate) {
+                        $found.Add($candidate)
+                    }
+                }
+
+                # Algumas instalações também registram ExecutablePath.
+                $executablePath = $key.GetValue('ExecutablePath')
+                if (-not [string]::IsNullOrWhiteSpace($executablePath) -and
+                    (Test-Path -LiteralPath $executablePath)) {
+                    $found.Add([string]$executablePath)
+                }
+            }
+            catch {
+                # Continua procurando em outras versões/chaves.
+            }
+        }
     }
 
-    $py = Get-Command 'py.exe' -ErrorAction SilentlyContinue
-    if ($py) {
-        foreach ($selector in @('-3.14', '-3.13', '-3.12', '-3.11', '-3.10', '-3.9')) {
-            $candidate = Test-PythonCandidate -Executable $py.Source -PrefixArgs @($selector)
-            if ($candidate) { return $candidate }
+    return @($found | Select-Object -Unique)
+}
+
+function Get-PythonKnownPaths {
+    $patterns = New-Object System.Collections.Generic.List[string]
+
+    if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+        $patterns.Add((Join-Path $env:LOCALAPPDATA 'Programs\Python\Python*\python.exe'))
+        $patterns.Add((Join-Path $env:LOCALAPPDATA 'Python\pythoncore-*\python.exe'))
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        $patterns.Add((Join-Path $env:ProgramFiles 'Python*\python.exe'))
+    }
+
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    if (-not [string]::IsNullOrWhiteSpace($programFilesX86)) {
+        $patterns.Add((Join-Path $programFilesX86 'Python*\python.exe'))
+    }
+
+    $found = New-Object System.Collections.Generic.List[string]
+
+    foreach ($pattern in $patterns) {
+        Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue |
+            ForEach-Object { $found.Add($_.FullName) }
+    }
+
+    return @($found | Select-Object -Unique)
+}
+
+function Get-PythonLauncherCandidates {
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    $pyCommand = Get-Command 'py.exe' -ErrorAction SilentlyContinue
+    if ($pyCommand -and $pyCommand.Source) {
+        $candidates.Add($pyCommand.Source)
+    }
+
+    $known = @(
+        (Join-Path $env:WINDIR 'py.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Launcher\py.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\py.exe'),
+        'C:\Program Files\Python Launcher\py.exe'
+    )
+
+    foreach ($path in $known) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path)) {
+            $candidates.Add($path)
         }
+    }
+
+    return @($candidates | Select-Object -Unique)
+}
+
+function Find-InstalledPython {
+    Refresh-PathEnvironment
+
+    # 1. python.exe disponível no PATH.
+    $pythonCommands = @(Get-Command 'python.exe' -All -ErrorAction SilentlyContinue)
+
+    foreach ($command in $pythonCommands) {
+        if ($command.Source) {
+            $candidate = Test-PythonCandidate -Executable $command.Source
+            if ($candidate) {
+                return $candidate
+            }
+        }
+    }
+
+    # 2. Launcher py.exe. Testa versões atuais da maior para a menor.
+    foreach ($launcher in Get-PythonLauncherCandidates) {
+        foreach ($selector in @('-3.14', '-3.13', '-3.12', '-3.11', '-3.10', '-3.9')) {
+            $candidate = Test-PythonCandidate -Executable $launcher -PrefixArgs @($selector)
+            if ($candidate) {
+                return $candidate
+            }
+        }
+
+        # Também tenta o Python padrão do launcher.
+        $candidate = Test-PythonCandidate -Executable $launcher
+        if ($candidate) {
+            return $candidate
+        }
+    }
+
+    # 3. Registro oficial do CPython (independe do PATH da sessão).
+    foreach ($path in Get-PythonFromRegistry) {
+        $candidate = Test-PythonCandidate -Executable $path
+        if ($candidate) {
+            return $candidate
+        }
+    }
+
+    # 4. Diretórios conhecidos do instalador oficial.
+    foreach ($path in Get-PythonKnownPaths) {
+        $candidate = Test-PythonCandidate -Executable $path
+        if ($candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Resolve-Python {
+    $candidate = Find-InstalledPython
+
+    if ($candidate) {
+        return $candidate
     }
 
     Install-WithWinget -PackageId 'Python.Python.3.14' -DisplayName 'Python 3.14'
 
-    Refresh-PathEnvironment
-    $python = Get-Command 'python.exe' -ErrorAction SilentlyContinue
-    if ($python) {
-        $candidate = Test-PythonCandidate -Executable $python.Source
-        if ($candidate) { return $candidate }
+    Write-Step 'Localizando o Python recém-instalado...'
+
+    # O WinGet conclui a instalação antes de retornar, mas alterações no PATH
+    # do processo atual podem não ficar visíveis imediatamente. Por isso,
+    # consultamos PATH, launcher, Registro e diretórios oficiais.
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        Refresh-PathEnvironment
+
+        $candidate = Find-InstalledPython
+        if ($candidate) {
+            Write-Ok "Python localizado sem reiniciar o terminal: $($candidate.Exe)"
+            return $candidate
+        }
+
+        Start-Sleep -Seconds 1
     }
 
-    $py = Get-Command 'py.exe' -ErrorAction SilentlyContinue
-    if ($py) {
-        $candidate = Test-PythonCandidate -Executable $py.Source -PrefixArgs @('-3.14')
-        if ($candidate) { return $candidate }
-    }
+    throw @'
+Python foi instalado pelo WinGet, mas o executável ainda não pôde ser localizado.
 
-    throw 'Python foi instalado, mas não pôde ser localizado. Abra um novo terminal e execute novamente.'
+O instalador já verificou:
+- PATH atualizado;
+- Python Launcher (py.exe);
+- Registro do Windows (PythonCore / PEP 514);
+- AppData\Local\Programs\Python;
+- Program Files\Python*.
+
+Abra "Aplicativos instalados" para confirmar a instalação. Se Python estiver
+presente, feche este gerenciador e execute-o novamente.
+'@
 }
 
 function Ensure-Pip {
@@ -545,18 +833,19 @@ function Install-Emprestimo {
         throw 'Instalação cancelada para evitar sobrescrever uma instalação existente.'
     }
 
-    $git = Resolve-Git
-    Write-Ok "Git: $git"
-
-    $python = Resolve-Python
-    Write-Ok "Python $($python.Version): $($python.Exe)"
-    Ensure-Pip -PythonExe $python.Exe
-
+    # A pasta é escolhida antes de baixar/instalar dependências.
     $target = $InstallPath
+
     if ([string]::IsNullOrWhiteSpace($target)) {
-        $entered = Read-Host "Pasta de instalação [$($Script:DefaultInstallPath)]"
-        $target = if ([string]::IsNullOrWhiteSpace($entered)) { $Script:DefaultInstallPath } else { $entered.Trim() }
+        $suggestedBase = Split-Path -Parent $Script:DefaultInstallPath
+        $target = Select-InstallFolder -SuggestedBasePath $suggestedBase
+
+        if ([string]::IsNullOrWhiteSpace($target)) {
+            Write-Warn 'Instalação cancelada pelo usuário.'
+            return
+        }
     }
+
     $target = [IO.Path]::GetFullPath($target)
 
     if (Test-Path $target) {
@@ -565,6 +854,19 @@ function Install-Emprestimo {
             throw "A pasta '$target' já existe e não está vazia. Escolha outra pasta ou remova o conteúdo manualmente."
         }
     }
+
+    Write-Host ''
+    Write-Host "Pasta selecionada: $target" -ForegroundColor Green
+
+    Write-Step 'Verificando dependências necessárias...'
+
+    $git = Resolve-Git
+    Write-Ok "Git: $git"
+
+    $python = Resolve-Python
+    Write-Ok "Python $($python.Version): $($python.Exe)"
+
+    Ensure-Pip -PythonExe $python.Exe
 
     if (-not $Acesso) {
         Write-Host ''
@@ -601,6 +903,19 @@ function Install-Emprestimo {
         foreach ($ip in $ips) {
             Write-Host "URL rede:  http://$ip`:$Porta/" -ForegroundColor Green
         }
+    }
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        [System.Windows.Forms.MessageBox]::Show(
+            "Instalação concluída com sucesso.`n`nPasta: $target`nServiço: Emprestimo`nURL: http://localhost:$Porta/",
+            'Sistema Emprestimo',
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        ) | Out-Null
+    }
+    catch {
+        # A mensagem gráfica é apenas conveniência; não afeta a instalação.
     }
 }
 
