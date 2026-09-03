@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}A Receber{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>A Receber</h1>
+        <p class="muted">Agenda de juros previstos e confirmação dos recebimentos.</p>
+    </div>
+</div>
+
+<div class="receivable-period-grid">
+{% for key, periodo in periodos.items() %}
+    <section class="card period-card">
+        <div class="period-card-header">
+            <strong>{{ periodo['titulo'] }}</strong>
+            <small>{{ periodo['inicio']|date_br }} a {{ periodo['fim']|date_br }}</small>
+        </div>
+        <dl class="period-metrics">
+            <div><dt>Juros previstos</dt><dd>{{ periodo['resumo']['previsto_centavos']|money }}</dd></div>
+            <div><dt>Falta receber</dt><dd>{{ periodo['resumo']['pendente_centavos']|money }}</dd></div>
+            <div><dt>Juros recebidos</dt><dd>{{ periodo['resumo']['juros_recebidos_centavos']|money }}</dd></div>
+            <div><dt>Total recebido</dt><dd>{{ periodo['resumo']['total_recebido_centavos']|money }}</dd></div>
+        </dl>
+    </section>
+{% endfor %}
+</div>
+
+<section class="card section-card">
+    <form class="filters filters-receivables" method="get">
+        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, empréstimo ou competência">
+        <select name="status">
+            <option value="abertos" {{ 'selected' if status == 'abertos' }}>Em aberto</option>
+            <option value="previsto" {{ 'selected' if status == 'previsto' }}>Previstos</option>
+            <option value="vencido" {{ 'selected' if status == 'vencido' }}>Vencidos</option>
+            <option value="recebido" {{ 'selected' if status == 'recebido' }}>Recebidos</option>
+            <option value="cancelado" {{ 'selected' if status == 'cancelado' }}>Cancelados</option>
+            <option value="todos" {{ 'selected' if status == 'todos' }}>Todos</option>
+        </select>
+        <select name="periodo">
+            <option value="todos" {{ 'selected' if periodo_key == 'todos' }}>Todos os períodos</option>
+            {% for key, periodo in periodos.items() %}
+                <option value="{{ key }}" {{ 'selected' if periodo_key == key }}>{{ periodo['titulo'] }}</option>
+            {% endfor %}
+        </select>
+        <button class="button button-secondary" type="submit">Filtrar</button>
+    </form>
+</section>
+
+<section class="card table-card">
+{% if titulos %}
+<div class="table-responsive">
+<table>
+    <thead><tr><th>Vencimento</th><th>Cliente</th><th>Empréstimo</th><th>Competência</th><th class="text-right">Valor previsto</th><th>Status</th><th>Recebido em</th><th>Ação</th></tr></thead>
+    <tbody>
+    {% for titulo in titulos %}
+        <tr>
+            <td>{{ titulo['data_vencimento']|date_br }}</td>
+            <td><a href="{{ url_for('clientes_detalhe', cliente_id=titulo['cliente_id']) }}">{{ titulo['cliente_nome'] }}</a></td>
+            <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=titulo['emprestimo_id']) }}">#{{ titulo['emprestimo_id'] }}</a></td>
+            <td>{{ titulo['competencia']|competencia_br }}</td>
+            <td class="text-right"><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></td>
+            <td><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></td>
+            <td>{{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}</td>
+            <td><a class="button button-small {{ 'button' if titulo['status'] in ['PREVISTO', 'VENCIDO'] else 'button-light' }}" href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['id']) }}">{{ 'Confirmar recebimento' if titulo['status'] in ['PREVISTO', 'VENCIDO'] else 'Abrir' }}</a></td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}<div class="empty-state">Nenhum título encontrado para os filtros informados.</div>{% endif %}
+</section>
+{% endblock %}

@@ -6,7 +6,7 @@ import re
 import secrets
 import sqlite3
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
 from pathlib import Path
@@ -244,6 +244,31 @@ def init_db() -> None:
             FOREIGN KEY (conta_origem_id) REFERENCES contas_bancarias(id) ON UPDATE CASCADE ON DELETE RESTRICT,
             FOREIGN KEY (conta_destino_id) REFERENCES contas_bancarias(id) ON UPDATE CASCADE ON DELETE RESTRICT
         );
+
+        CREATE TABLE IF NOT EXISTS titulos_receber (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            emprestimo_id INTEGER NOT NULL,
+            tipo TEXT NOT NULL DEFAULT 'JUROS' CHECK (tipo IN ('JUROS')),
+            competencia TEXT NOT NULL,
+            data_vencimento TEXT NOT NULL,
+            valor_previsto_centavos INTEGER NOT NULL CHECK (valor_previsto_centavos >= 0),
+            saldo_base_centavos INTEGER NOT NULL CHECK (saldo_base_centavos >= 0),
+            taxa_juros_mensal REAL NOT NULL CHECK (taxa_juros_mensal >= 0),
+            status TEXT NOT NULL DEFAULT 'PREVISTO'
+                CHECK (status IN ('PREVISTO', 'VENCIDO', 'RECEBIDO', 'CANCELADO')),
+            movimentacao_id INTEGER,
+            data_recebimento TEXT,
+            observacao TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (emprestimo_id) REFERENCES emprestimos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
+            FOREIGN KEY (movimentacao_id) REFERENCES movimentacoes_emprestimo(id) ON UPDATE CASCADE ON DELETE SET NULL,
+            UNIQUE (emprestimo_id, tipo, competencia)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_titulos_receber_vencimento ON titulos_receber(data_vencimento);
+        CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status);
+        CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id);
 
         CREATE TABLE IF NOT EXISTS cartoes_credito (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -682,6 +707,260 @@ def add_months_iso(base_date: date, months: int) -> date:
     month = month_index % 12 + 1
     day = min(base_date.day, monthrange(year, month)[1])
     return date(year, month, day)
+
+
+
+def first_day_of_month(value: date) -> date:
+    return value.replace(day=1)
+
+
+def last_day_of_month(value: date) -> date:
+    return value.replace(day=monthrange(value.year, value.month)[1])
+
+
+def competencia_date(value: date) -> str:
+    return value.strftime("%Y-%m")
+
+
+def due_date_for_competence(competencia: str, dia_vencimento: int) -> date:
+    year_text, month_text = competencia.split("-")
+    year = int(year_text)
+    month = int(month_text)
+    day = min(int(dia_vencimento), monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+def get_receivable_periods(reference: date | None = None) -> dict[str, dict[str, Any]]:
+    today = reference or date.today()
+    current_week_start = today - timedelta(days=today.weekday())
+    current_week_end = current_week_start + timedelta(days=6)
+    next_week_start = current_week_end + timedelta(days=1)
+    next_week_end = next_week_start + timedelta(days=6)
+    current_month_start = first_day_of_month(today)
+    current_month_end = last_day_of_month(today)
+    next_month_start = add_months_iso(current_month_start, 1)
+    next_month_end = last_day_of_month(next_month_start)
+
+    return {
+        "semana_atual": {"titulo": "Semana atual", "inicio": current_week_start, "fim": current_week_end},
+        "proxima_semana": {"titulo": "Próxima semana", "inicio": next_week_start, "fim": next_week_end},
+        "mes_atual": {"titulo": "Mês atual", "inicio": current_month_start, "fim": current_month_end},
+        "proximo_mes": {"titulo": "Próximo mês", "inicio": next_month_start, "fim": next_month_end},
+    }
+
+
+def receivable_period_summary(db: sqlite3.Connection, start_date: date, end_date: date) -> dict[str, int]:
+    start_iso = start_date.isoformat()
+    end_iso = end_date.isoformat()
+
+    titulo = db.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN status <> 'CANCELADO' THEN valor_previsto_centavos ELSE 0 END), 0) AS previsto_centavos,
+            COALESCE(SUM(CASE WHEN status IN ('PREVISTO', 'VENCIDO') THEN valor_previsto_centavos ELSE 0 END), 0) AS pendente_centavos,
+            COALESCE(SUM(CASE WHEN status = 'RECEBIDO' THEN valor_previsto_centavos ELSE 0 END), 0) AS titulos_recebidos_centavos,
+            COALESCE(SUM(CASE WHEN status IN ('PREVISTO', 'VENCIDO') THEN 1 ELSE 0 END), 0) AS titulos_pendentes
+          FROM titulos_receber
+         WHERE data_vencimento BETWEEN ? AND ?
+        """,
+        (start_iso, end_iso),
+    ).fetchone()
+
+    movimentos = db.execute(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN tipo = 'JUROS' THEN valor_centavos ELSE 0 END), 0) AS juros_recebidos_centavos,
+            COALESCE(SUM(CASE WHEN tipo IN ('JUROS', 'ABATIMENTO', 'QUITACAO') THEN valor_centavos ELSE 0 END), 0) AS total_recebido_centavos
+          FROM movimentacoes_emprestimo
+         WHERE data_movimento BETWEEN ? AND ?
+        """,
+        (start_iso, end_iso),
+    ).fetchone()
+
+    return {
+        "previsto_centavos": int(titulo["previsto_centavos"] or 0),
+        "pendente_centavos": int(titulo["pendente_centavos"] or 0),
+        "titulos_recebidos_centavos": int(titulo["titulos_recebidos_centavos"] or 0),
+        "titulos_pendentes": int(titulo["titulos_pendentes"] or 0),
+        "juros_recebidos_centavos": int(movimentos["juros_recebidos_centavos"] or 0),
+        "total_recebido_centavos": int(movimentos["total_recebido_centavos"] or 0),
+    }
+
+
+def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> None:
+    today = date.today()
+    current_month = first_day_of_month(today)
+
+    existing_titles = db.execute(
+        """
+        SELECT id, emprestimo_id, competencia, data_vencimento, status, movimentacao_id
+          FROM titulos_receber
+         WHERE tipo = 'JUROS'
+        """
+    ).fetchall()
+
+    for titulo in existing_titles:
+        movement = db.execute(
+            """
+            SELECT id, data_movimento
+              FROM movimentacoes_emprestimo
+             WHERE emprestimo_id = ?
+               AND tipo = 'JUROS'
+               AND competencia = ?
+             ORDER BY id DESC
+             LIMIT 1
+            """,
+            (titulo["emprestimo_id"], titulo["competencia"]),
+        ).fetchone()
+
+        if movement is not None:
+            db.execute(
+                """
+                UPDATE titulos_receber
+                   SET status = 'RECEBIDO',
+                       movimentacao_id = ?,
+                       data_recebimento = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?
+                """,
+                (movement["id"], movement["data_movimento"], titulo["id"]),
+            )
+            continue
+
+        due = date.fromisoformat(titulo["data_vencimento"])
+        expected_status = "VENCIDO" if due < today else "PREVISTO"
+        if titulo["status"] == "RECEBIDO":
+            db.execute(
+                """
+                UPDATE titulos_receber
+                   SET status = ?, movimentacao_id = NULL, data_recebimento = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?
+                """,
+                (expected_status, titulo["id"]),
+            )
+        elif titulo["status"] in {"PREVISTO", "VENCIDO"} and titulo["status"] != expected_status:
+            db.execute(
+                "UPDATE titulos_receber SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (expected_status, titulo["id"]),
+            )
+
+    loans = db.execute(
+        """
+        SELECT id, cliente_id, data_emprestimo, data_primeiro_vencimento,
+               dia_vencimento, saldo_atual_centavos, taxa_juros_mensal, status
+          FROM emprestimos
+         WHERE saldo_atual_centavos > 0
+           AND status IN ('ATIVO', 'VENCIDO')
+           AND taxa_juros_mensal > 0
+        """
+    ).fetchall()
+
+    for emprestimo in loans:
+        loan_date = date.fromisoformat(emprestimo["data_emprestimo"])
+        if emprestimo["data_primeiro_vencimento"]:
+            first_due = date.fromisoformat(emprestimo["data_primeiro_vencimento"])
+        else:
+            base_due = add_months_iso(loan_date, 1)
+            due_day = int(emprestimo["dia_vencimento"] or base_due.day)
+            first_due = base_due.replace(day=min(due_day, monthrange(base_due.year, base_due.month)[1]))
+
+        due_day = int(emprestimo["dia_vencimento"] or first_due.day)
+
+        for month_offset in range(months_ahead + 1):
+            period_date = add_months_iso(current_month, month_offset)
+            competencia = competencia_date(period_date)
+            due = due_date_for_competence(competencia, due_day)
+            if due < first_due:
+                continue
+
+            actual = db.execute(
+                """
+                SELECT id, data_movimento
+                  FROM movimentacoes_emprestimo
+                 WHERE emprestimo_id = ?
+                   AND tipo = 'JUROS'
+                   AND competencia = ?
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (emprestimo["id"], competencia),
+            ).fetchone()
+
+            titulo = db.execute(
+                """
+                SELECT id, status, data_vencimento
+                  FROM titulos_receber
+                 WHERE emprestimo_id = ? AND tipo = 'JUROS' AND competencia = ?
+                """,
+                (emprestimo["id"], competencia),
+            ).fetchone()
+
+            if actual is not None:
+                if titulo is not None:
+                    db.execute(
+                        """
+                        UPDATE titulos_receber
+                           SET status = 'RECEBIDO', movimentacao_id = ?,
+                               data_recebimento = ?, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                        """,
+                        (actual["id"], actual["data_movimento"], titulo["id"]),
+                    )
+                continue
+
+            amount = calcular_juros_centavos(
+                emprestimo["saldo_atual_centavos"],
+                emprestimo["taxa_juros_mensal"],
+            )
+            if amount <= 0:
+                continue
+
+            if titulo is None:
+                status = "VENCIDO" if due < today else "PREVISTO"
+                db.execute(
+                    """
+                    INSERT INTO titulos_receber (
+                        emprestimo_id, tipo, competencia, data_vencimento,
+                        valor_previsto_centavos, saldo_base_centavos,
+                        taxa_juros_mensal, status
+                    ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        emprestimo["id"], competencia, due.isoformat(), amount,
+                        emprestimo["saldo_atual_centavos"],
+                        emprestimo["taxa_juros_mensal"], status,
+                    ),
+                )
+            elif titulo["status"] == "PREVISTO" and date.fromisoformat(titulo["data_vencimento"]) >= today:
+                db.execute(
+                    """
+                    UPDATE titulos_receber
+                       SET data_vencimento = ?, valor_previsto_centavos = ?,
+                           saldo_base_centavos = ?, taxa_juros_mensal = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                     WHERE id = ?
+                    """,
+                    (
+                        due.isoformat(), amount,
+                        emprestimo["saldo_atual_centavos"],
+                        emprestimo["taxa_juros_mensal"], titulo["id"],
+                    ),
+                )
+
+    db.execute(
+        """
+        UPDATE titulos_receber
+           SET status = 'CANCELADO', updated_at = CURRENT_TIMESTAMP
+         WHERE status = 'PREVISTO'
+           AND data_vencimento > ?
+           AND emprestimo_id IN (
+                SELECT id FROM emprestimos
+                 WHERE status = 'QUITADO' OR saldo_atual_centavos <= 0
+           )
+        """,
+        (today.isoformat(),),
+    )
+    db.commit()
 
 
 def split_centavos(total_centavos: int, quantidade: int) -> list[int]:
@@ -1123,6 +1402,7 @@ def register_routes(app: Flask) -> None:
     @login_required
     def dashboard():
         db = get_db()
+        sync_receivable_titles(db)
         mes_atual = date.today().strftime("%Y-%m")
 
         metrics = db.execute(
@@ -1175,12 +1455,33 @@ def register_routes(app: Flask) -> None:
             """
         ).fetchall()
 
+        periodos_recebimento = get_receivable_periods()
+        for periodo in periodos_recebimento.values():
+            periodo["resumo"] = receivable_period_summary(db, periodo["inicio"], periodo["fim"])
+
+        proximos_titulos = db.execute(
+            """
+            SELECT t.id, t.competencia, t.data_vencimento,
+                   t.valor_previsto_centavos, t.status,
+                   e.id AS emprestimo_id, c.nome AS cliente_nome
+              FROM titulos_receber t
+              JOIN emprestimos e ON e.id = t.emprestimo_id
+              JOIN clientes c ON c.id = e.cliente_id
+             WHERE t.status IN ('PREVISTO', 'VENCIDO')
+             ORDER BY CASE WHEN t.status = 'VENCIDO' THEN 0 ELSE 1 END,
+                      t.data_vencimento, c.nome COLLATE NOCASE
+             LIMIT 8
+            """
+        ).fetchall()
+
         return render_template(
             "dashboard.html",
             metrics=metrics,
             ultimos_emprestimos=ultimos_emprestimos,
             ultimas_movimentacoes=ultimas_movimentacoes,
             mes_atual=mes_atual,
+            periodos_recebimento=periodos_recebimento,
+            proximos_titulos=proximos_titulos,
         )
 
     # -------------------- Clientes --------------------
@@ -2532,6 +2833,253 @@ def register_routes(app: Flask) -> None:
             termo=termo,
         )
 
+
+
+    # -------------------- Agenda / Títulos a receber --------------------
+
+    @app.get("/receber")
+    @login_required
+    def titulos_receber_lista():
+        db = get_db()
+        sync_receivable_titles(db)
+
+        status = request.args.get("status", "abertos").strip().lower()
+        periodo_key = request.args.get("periodo", "todos").strip().lower()
+        termo = request.args.get("q", "").strip()
+        periodos = get_receivable_periods()
+
+        sql = """
+            SELECT t.id, t.tipo, t.competencia, t.data_vencimento,
+                   t.valor_previsto_centavos, t.saldo_base_centavos,
+                   t.taxa_juros_mensal, t.status,
+                   t.data_recebimento, t.movimentacao_id,
+                   e.id AS emprestimo_id,
+                   e.saldo_atual_centavos,
+                   c.id AS cliente_id,
+                   c.nome AS cliente_nome
+              FROM titulos_receber t
+              JOIN emprestimos e ON e.id = t.emprestimo_id
+              JOIN clientes c ON c.id = e.cliente_id
+             WHERE 1 = 1
+        """
+        params: list[Any] = []
+
+        if status == "abertos":
+            sql += " AND t.status IN ('PREVISTO', 'VENCIDO')"
+        elif status in {"previsto", "vencido", "recebido", "cancelado"}:
+            sql += " AND t.status = ?"
+            params.append(status.upper())
+
+        if periodo_key in periodos:
+            periodo = periodos[periodo_key]
+            sql += " AND t.data_vencimento BETWEEN ? AND ?"
+            params.extend([periodo["inicio"].isoformat(), periodo["fim"].isoformat()])
+
+        if termo:
+            like = f"%{termo}%"
+            sql += """
+                AND (
+                    c.nome LIKE ? COLLATE NOCASE
+                    OR CAST(e.id AS TEXT) LIKE ?
+                    OR t.competencia LIKE ?
+                )
+            """
+            params.extend([like, like, like])
+
+        sql += """
+            ORDER BY
+                CASE
+                    WHEN t.status = 'VENCIDO' THEN 0
+                    WHEN t.status = 'PREVISTO' THEN 1
+                    WHEN t.status = 'RECEBIDO' THEN 2
+                    ELSE 3
+                END,
+                t.data_vencimento,
+                c.nome COLLATE NOCASE
+            LIMIT 500
+        """
+
+        titulos = db.execute(sql, params).fetchall()
+        for periodo in periodos.values():
+            periodo["resumo"] = receivable_period_summary(db, periodo["inicio"], periodo["fim"])
+
+        return render_template(
+            "receber/lista.html",
+            titulos=titulos,
+            status=status,
+            periodo_key=periodo_key,
+            termo=termo,
+            periodos=periodos,
+        )
+
+    @app.route("/receber/<int:titulo_id>", methods=["GET", "POST"])
+    @login_required
+    def titulos_receber_detalhe(titulo_id: int):
+        db = get_db()
+        sync_receivable_titles(db)
+
+        titulo = db.execute(
+            """
+            SELECT t.*,
+                   e.cliente_id,
+                   e.data_emprestimo,
+                   e.saldo_atual_centavos,
+                   e.status AS emprestimo_status,
+                   c.nome AS cliente_nome
+              FROM titulos_receber t
+              JOIN emprestimos e ON e.id = t.emprestimo_id
+              JOIN clientes c ON c.id = e.cliente_id
+             WHERE t.id = ?
+            """,
+            (titulo_id,),
+        ).fetchone()
+
+        if titulo is None:
+            abort(404)
+
+        contas_cliente = get_client_accounts(titulo["cliente_id"])
+        contas_proprias = get_own_accounts()
+
+        form = {
+            "data_recebimento": request.form.get("data_recebimento", date.today().isoformat()),
+            "conta_origem_id": (
+                parse_int(request.form.get("conta_origem_id"))
+                if request.method == "POST"
+                else (contas_cliente[0]["id"] if contas_cliente else None)
+            ),
+            "conta_destino_id": (
+                parse_int(request.form.get("conta_destino_id"))
+                if request.method == "POST"
+                else (contas_proprias[0]["id"] if contas_proprias else None)
+            ),
+            "observacao": request.form.get("observacao", ""),
+        }
+
+        if request.method == "POST":
+            if titulo["status"] == "RECEBIDO":
+                flash("Este título já está marcado como recebido.", "warning")
+                return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
+            if titulo["status"] == "CANCELADO":
+                flash("Este título está cancelado e não pode ser recebido.", "warning")
+                return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
+
+            data_recebimento = parse_iso_date(form["data_recebimento"])
+            errors: list[str] = []
+            if data_recebimento is None:
+                errors.append("Informe uma data válida para o recebimento.")
+            elif data_recebimento < date.fromisoformat(titulo["data_emprestimo"]):
+                errors.append("A data do recebimento não pode ser anterior ao empréstimo.")
+
+            errors.extend(validate_money_flow_accounts(
+                titulo["cliente_id"],
+                form["conta_origem_id"],
+                form["conta_destino_id"],
+                is_loan_disbursement=False,
+            ))
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                duplicate = db.execute(
+                    """
+                    SELECT id, data_movimento
+                      FROM movimentacoes_emprestimo
+                     WHERE emprestimo_id = ?
+                       AND tipo = 'JUROS'
+                       AND competencia = ?
+                     LIMIT 1
+                    """,
+                    (titulo["emprestimo_id"], titulo["competencia"]),
+                ).fetchone()
+
+                if duplicate is not None:
+                    db.execute(
+                        """
+                        UPDATE titulos_receber
+                           SET status = 'RECEBIDO', movimentacao_id = ?,
+                               data_recebimento = ?, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                        """,
+                        (duplicate["id"], duplicate["data_movimento"], titulo_id),
+                    )
+                    db.commit()
+                    flash("Já existia uma movimentação de juros para esta competência; o título foi vinculado a ela.", "success")
+                    return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
+
+                origem_banco, origem_pix, destino_banco, destino_pix = get_account_snapshots(
+                    form["conta_origem_id"], form["conta_destino_id"]
+                )
+
+                try:
+                    cursor = db.execute(
+                        """
+                        INSERT INTO movimentacoes_emprestimo (
+                            emprestimo_id, tipo, data_movimento, valor_centavos,
+                            observacao, competencia, usuario_id,
+                            saldo_antes_centavos, saldo_depois_centavos,
+                            conta_origem_id, conta_destino_id,
+                            origem_banco_snapshot, origem_pix_snapshot,
+                            destino_banco_snapshot, destino_pix_snapshot
+                        ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            titulo["emprestimo_id"], data_recebimento.isoformat(),
+                            titulo["valor_previsto_centavos"], normalize_optional(form["observacao"]),
+                            titulo["competencia"], g.usuario["id"],
+                            titulo["saldo_atual_centavos"], titulo["saldo_atual_centavos"],
+                            form["conta_origem_id"], form["conta_destino_id"],
+                            origem_banco, origem_pix, destino_banco, destino_pix,
+                        ),
+                    )
+                    movement_id = int(cursor.lastrowid)
+
+                    db.execute(
+                        """
+                        UPDATE titulos_receber
+                           SET status = 'RECEBIDO', movimentacao_id = ?,
+                               data_recebimento = ?, observacao = ?,
+                               updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                        """,
+                        (movement_id, data_recebimento.isoformat(), normalize_optional(form["observacao"]), titulo_id),
+                    )
+                    registrar_auditoria(
+                        db, "titulo_receber", titulo_id, "RECEBIDO",
+                        json.dumps({
+                            "tipo": "JUROS",
+                            "competencia": titulo["competencia"],
+                            "valor_centavos": titulo["valor_previsto_centavos"],
+                            "movimentacao_id": movement_id,
+                        }, ensure_ascii=False),
+                    )
+                    db.commit()
+                except sqlite3.IntegrityError:
+                    db.rollback()
+                    flash("Os juros desta competência já foram registrados.", "warning")
+                else:
+                    flash(f"Recebimento de {format_money(titulo['valor_previsto_centavos'])} confirmado.", "success")
+                    return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
+
+        titulo = db.execute(
+            """
+            SELECT t.*, e.cliente_id, e.saldo_atual_centavos,
+                   e.status AS emprestimo_status, c.nome AS cliente_nome
+              FROM titulos_receber t
+              JOIN emprestimos e ON e.id = t.emprestimo_id
+              JOIN clientes c ON c.id = e.cliente_id
+             WHERE t.id = ?
+            """,
+            (titulo_id,),
+        ).fetchone()
+
+        return render_template(
+            "receber/detalhe.html",
+            titulo=titulo,
+            contas_cliente=contas_cliente,
+            contas_proprias=contas_proprias,
+            form=form,
+        )
 
 
     # -------------------- Cartões de crédito --------------------

@@ -368,3 +368,21 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.35; }
 @media (max-width: 680px) {
     .filters-bank { grid-template-columns: 1fr; }
 }
+
+/* Agenda / títulos a receber */
+.badge-previsto { background: #eff6ff; color: #1d4ed8; }
+.badge-recebido { background: #ecfdf3; color: #087a37; }
+.receivable-period-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin-bottom:1.5rem; }
+.period-card { padding:1rem; }
+.period-card-header { display:flex; flex-direction:column; gap:.2rem; margin-bottom:.85rem; }
+.period-card-header small { color:var(--muted); }
+.period-metrics { display:grid; gap:.65rem; margin:0; }
+.period-metrics > div { display:flex; justify-content:space-between; gap:1rem; border-top:1px solid var(--border); padding-top:.55rem; }
+.period-metrics dt { color:var(--muted); font-size:.85rem; }
+.period-metrics dd { margin:0; font-weight:700; text-align:right; }
+.filters-receivables { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:.75rem; }
+.dashboard-projection-title { margin-top:1.5rem; margin-bottom:.8rem; }
+.dashboard-period-grid { margin-bottom:1rem; }
+.upcoming-receivables { margin-bottom:1.5rem; }
+@media (max-width:1100px) { .receivable-period-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:720px) { .receivable-period-grid,.filters-receivables { grid-template-columns:1fr; } }

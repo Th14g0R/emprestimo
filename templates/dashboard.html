@@ -42,6 +42,33 @@
     </div>
 </div>
 
+<div class="section-title-row dashboard-projection-title">
+    <div><h2>Projeção de recebimentos</h2><p class="muted section-subtitle">Juros esperados versus valores efetivamente recebidos.</p></div>
+    <a class="button button-secondary button-small" href="{{ url_for('titulos_receber_lista') }}">Abrir agenda</a>
+</div>
+
+<div class="receivable-period-grid dashboard-period-grid">
+{% for key, periodo in periodos_recebimento.items() %}
+    <section class="card period-card">
+        <div class="period-card-header"><strong>{{ periodo['titulo'] }}</strong><small>{{ periodo['inicio']|date_br }} a {{ periodo['fim']|date_br }}</small></div>
+        <dl class="period-metrics compact-period-metrics">
+            <div><dt>Falta receber</dt><dd>{{ periodo['resumo']['pendente_centavos']|money }}</dd></div>
+            <div><dt>Juros recebidos</dt><dd>{{ periodo['resumo']['juros_recebidos_centavos']|money }}</dd></div>
+            <div><dt>Total recebido</dt><dd>{{ periodo['resumo']['total_recebido_centavos']|money }}</dd></div>
+        </dl>
+    </section>
+{% endfor %}
+</div>
+
+<section class="card section-card upcoming-receivables">
+    <div class="section-title-row"><div><h2>Próximos títulos</h2><p class="muted section-subtitle">Juros previstos que ainda aguardam confirmação.</p></div><a class="button button-secondary button-small" href="{{ url_for('titulos_receber_lista') }}">Ver todos</a></div>
+    {% if proximos_titulos %}
+    <div class="table-responsive"><table><thead><tr><th>Vencimento</th><th>Cliente</th><th>Contrato</th><th>Competência</th><th class="text-right">Valor</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for titulo in proximos_titulos %}<tr><td>{{ titulo['data_vencimento']|date_br }}</td><td>{{ titulo['cliente_nome'] }}</td><td>#{{ titulo['emprestimo_id'] }}</td><td>{{ titulo['competencia']|competencia_br }}</td><td class="text-right"><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></td><td><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></td><td><a class="button button-small" href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['id']) }}">Abrir</a></td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state">Nenhum juro previsto em aberto neste momento.</div>{% endif %}
+</section>
+
 <div class="dashboard-columns">
 <section class="card section-card">
     <div class="section-title-row">
