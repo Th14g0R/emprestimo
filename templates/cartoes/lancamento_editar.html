@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Alterar lançamento - {{ lancamento['cartao_descricao'] }}{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Alterar lançamento</h1>
+        <p class="muted">
+            {{ lancamento['cliente_nome'] }} · {{ lancamento['cartao_descricao'] }}
+        </p>
+    </div>
+    <a class="button button-light"
+       href="{{ url_for('cartoes_detalhe', cartao_id=lancamento['cartao_id']) }}">
+        Voltar
+    </a>
+</div>
+
+{% if bloqueio_financeiro %}
+<div class="alert alert-warning">
+    Este lançamento já possui {{ lancamento['parcelas_pagas'] }} parcela(s) paga(s).
+    Para preservar o histórico financeiro, valor, quantidade de parcelas, data da
+    compra e vencimentos não podem mais ser regenerados. A descrição ainda pode
+    ser corrigida mediante senha.
+</div>
+{% endif %}
+
+<form method="post" class="card section-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <div class="form-grid form-grid-2">
+        <label class="field-span-2">
+            Descrição da compra
+            <input name="descricao"
+                   value="{{ form['descricao'] }}"
+                   maxlength="160"
+                   required>
+        </label>
+
+        <label>
+            Valor total (R$)
+            <input name="valor_total"
+                   value="{{ form['valor_total'] }}"
+                   inputmode="decimal"
+                   required
+                   {{ 'readonly' if bloqueio_financeiro }}>
+        </label>
+
+        <label>
+            Quantidade de parcelas
+            <input type="number"
+                   name="quantidade_parcelas"
+                   value="{{ form['quantidade_parcelas'] }}"
+                   min="1"
+                   max="120"
+                   required
+                   {{ 'readonly' if bloqueio_financeiro }}>
+        </label>
+
+        <label>
+            Data da compra
+            <input type="date"
+                   name="data_compra"
+                   value="{{ form['data_compra'] }}"
+                   required
+                   {{ 'readonly' if bloqueio_financeiro }}>
+        </label>
+
+        <label>
+            Primeiro vencimento
+            <input type="date"
+                   name="primeiro_vencimento"
+                   value="{{ form['primeiro_vencimento'] }}"
+                   required
+                   {{ 'readonly' if bloqueio_financeiro }}>
+        </label>
+
+        <label class="field-span-2">
+            Motivo da alteração
+            <textarea name="motivo_alteracao"
+                      rows="3"
+                      minlength="5"
+                      required
+                      placeholder="Ex.: valor/parcelamento digitado incorretamente">{{ form['motivo_alteracao'] }}</textarea>
+        </label>
+
+        <label class="field-span-2">
+            Confirme sua senha
+            <input type="password"
+                   name="senha_confirmacao"
+                   required
+                   autocomplete="current-password">
+            <small>
+                A alteração fica registrada na auditoria com usuário, motivo,
+                dados anteriores e novos dados.
+            </small>
+        </label>
+    </div>
+
+    {% if not bloqueio_financeiro %}
+    <div class="info-box">
+        Ao salvar, as parcelas ainda não realizadas serão recriadas a partir do
+        valor total, quantidade e primeiro vencimento informados. O rateio de
+        centavos continua preservando exatamente o total do lançamento.
+    </div>
+    {% endif %}
+
+    <div class="form-actions">
+        <a class="button button-light"
+           href="{{ url_for('cartoes_detalhe', cartao_id=lancamento['cartao_id']) }}">
+            Cancelar
+        </a>
+        <button class="button" type="submit">Salvar alteração</button>
+    </div>
+</form>
+
+{% endblock %}

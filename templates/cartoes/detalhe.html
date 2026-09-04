@@ -1,8 +1,173 @@
 {% extends "base.html" %}
 {% block title %}{{ cartao['descricao'] }}{% endblock %}
 {% block content %}
-<div class="page-header"><div><h1>{{ cartao['descricao'] }}</h1><p class="muted"><a href="{{ url_for('clientes_detalhe', cliente_id=cartao['cliente_id']) }}">{{ cartao['cliente_nome'] }}</a> · {{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</p></div><div class="actions">{% if cartao['ativo'] %}<a class="button" href="{{ url_for('cartoes_lancamento_novo', cartao_id=cartao['id']) }}">Novo lançamento</a>{% endif %}<form method="post" action="{{ url_for('cartoes_status', cartao_id=cartao['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button {{ 'button-danger' if cartao['ativo'] else 'button-secondary' }}" type="submit">{{ 'Inativar' if cartao['ativo'] else 'Ativar' }}</button></form></div></div>
-<div class="loan-summary-grid"><div class="card metric-card"><span>Total parcelado</span><strong>{{ resumo['total_centavos']|money }}</strong></div><div class="card metric-card"><span>Pago</span><strong>{{ resumo['pago_centavos']|money }}</strong></div><div class="card metric-card"><span>Em aberto</span><strong>{{ resumo['aberto_centavos']|money }}</strong></div><div class="card metric-card"><span>Vencido</span><strong>{{ resumo['vencido_centavos']|money }}</strong></div></div>
-<section class="card section-card"><div class="section-title-row"><div><h2>Parcelas</h2><p class="muted section-subtitle">Pagamentos são independentes dos empréstimos e registram origem/destino bancário.</p></div></div>{% if parcelas %}<div class="table-responsive"><table><thead><tr><th>Vencimento</th><th>Compra</th><th>Parcela</th><th class="text-right">Valor</th><th>Status</th><th>Pagamento</th><th>Fluxo bancário</th><th></th></tr></thead><tbody>{% for p in parcelas %}<tr><td>{{ p['vencimento']|date_br }}</td><td>{{ p['lancamento_descricao'] }}</td><td>{{ p['numero_parcela'] }}</td><td class="text-right">{{ p['valor_centavos']|money }}</td><td><span class="badge badge-{{ p['status']|lower }}">{{ p['status'] }}</span></td><td>{{ p['data_pagamento']|date_br if p['data_pagamento'] else '-' }}</td><td>{% if p['origem_banco'] %}{{ p['origem_banco'] }} → {{ p['destino_banco'] or '?' }}{% else %}-{% endif %}</td><td>{% if p['status'] in ['PENDENTE','VENCIDO'] %}<a class="button button-small" href="{{ url_for('parcelas_cartao_pagar', parcela_id=p['id']) }}">Pagar</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Nenhuma parcela gerada.</div>{% endif %}</section>
-<section class="card section-card"><h2>Lançamentos</h2>{% if lancamentos %}<div class="table-responsive"><table><thead><tr><th>Data</th><th>Descrição</th><th class="text-right">Total</th><th>Parcelas</th><th>Usuário</th></tr></thead><tbody>{% for l in lancamentos %}<tr><td>{{ l['data_compra']|date_br }}</td><td>{{ l['descricao'] }}</td><td class="text-right">{{ l['valor_total_centavos']|money }}</td><td>{{ l['quantidade_parcelas'] }}x</td><td>{{ l['usuario_nome'] or '-' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">Nenhum lançamento.</div>{% endif %}</section>
+
+<div class="page-header">
+    <div>
+        <h1>{{ cartao['descricao'] }}</h1>
+        <p class="muted">
+            <a href="{{ url_for('clientes_detalhe', cliente_id=cartao['cliente_id']) }}">
+                {{ cartao['cliente_nome'] }}
+            </a>
+            · {{ 'Ativo' if cartao['ativo'] else 'Inativo' }}
+        </p>
+    </div>
+
+    <div class="actions wrap-actions">
+        {% if cartao['ativo'] %}
+            <a class="button" href="{{ url_for('cartoes_lancamento_novo', cartao_id=cartao['id']) }}">
+                Novo lançamento
+            </a>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('cartoes_status', cartao_id=cartao['id']) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button {{ 'button-danger' if cartao['ativo'] else 'button-secondary' }}" type="submit">
+                {{ 'Inativar' if cartao['ativo'] else 'Ativar' }}
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="loan-summary-grid">
+    <div class="card metric-card">
+        <span>Total parcelado</span>
+        <strong>{{ resumo['total_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Pago</span>
+        <strong>{{ resumo['pago_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Em aberto</span>
+        <strong>{{ resumo['aberto_centavos']|money }}</strong>
+    </div>
+    <div class="card metric-card">
+        <span>Vencido</span>
+        <strong>{{ resumo['vencido_centavos']|money }}</strong>
+    </div>
+</div>
+
+<section class="card section-card">
+    <div class="section-title-row">
+        <div>
+            <h2>Parcelas</h2>
+            <p class="muted section-subtitle">
+                Pagamentos do cartão e seus dados bancários.
+            </p>
+        </div>
+    </div>
+
+    {% if parcelas %}
+    <div class="table-responsive">
+        <table class="cards-installments-table">
+            <thead>
+                <tr>
+                    <th>Venc.</th>
+                    <th>Compra</th>
+                    <th>Parcela</th>
+                    <th class="text-right">Valor</th>
+                    <th>Status</th>
+                    <th>Pagamento</th>
+                    <th>Fluxo</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for p in parcelas %}
+                <tr>
+                    <td class="nowrap">{{ p['vencimento']|date_br }}</td>
+                    <td>{{ p['lancamento_descricao'] }}</td>
+                    <td class="nowrap">{{ p['numero_parcela'] }}</td>
+                    <td class="text-right nowrap">{{ p['valor_centavos']|money }}</td>
+                    <td><span class="badge badge-{{ p['status']|lower }}">{{ p['status'] }}</span></td>
+                    <td class="nowrap">{{ p['data_pagamento']|date_br if p['data_pagamento'] else '-' }}</td>
+                    <td class="compact-flow">
+                        {% if p['origem_banco'] %}
+                            <span title="{{ p['origem_banco'] }}">{{ p['origem_banco'] }}</span>
+                            <span class="flow-arrow">→</span>
+                            <span title="{{ p['destino_banco'] or '?' }}">{{ p['destino_banco'] or '?' }}</span>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="table-actions">
+                        {% if p['status'] in ['PENDENTE','VENCIDO'] %}
+                            <a class="button button-small" href="{{ url_for('parcelas_cartao_pagar', parcela_id=p['id']) }}">Pagar</a>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhuma parcela gerada.</div>
+    {% endif %}
+</section>
+
+<section class="card section-card">
+    <div class="section-title-row">
+        <div>
+            <h2>Lançamentos</h2>
+            <p class="muted section-subtitle">
+                Compras que originaram o parcelamento.
+            </p>
+        </div>
+    </div>
+
+    {% if lancamentos %}
+    <div class="table-responsive">
+        <table class="cards-launches-table">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Descrição</th>
+                    <th class="text-right">Total</th>
+                    <th>Parcelas</th>
+                    <th>Situação</th>
+                    <th>Usuário</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for l in lancamentos %}
+                <tr>
+                    <td class="nowrap">{{ l['data_compra']|date_br }}</td>
+                    <td>
+                        <strong>{{ l['descricao'] }}</strong>
+                        {% if l['primeiro_vencimento'] %}
+                            <div class="table-subtext">
+                                1º venc.: {{ l['primeiro_vencimento']|date_br }}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td class="text-right nowrap">{{ l['valor_total_centavos']|money }}</td>
+                    <td class="nowrap">{{ l['quantidade_parcelas'] }}x</td>
+                    <td>
+                        {% if l['parcelas_pagas'] %}
+                            <span class="badge badge-pago">
+                                {{ l['parcelas_pagas'] }}/{{ l['parcelas_geradas'] }} paga(s)
+                            </span>
+                        {% else %}
+                            <span class="badge badge-pendente">Sem pagamento</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ l['usuario_nome'] or '-' }}</td>
+                    <td class="table-actions">
+                        <a class="button button-light button-small"
+                           href="{{ url_for('cartoes_lancamento_editar', lancamento_id=l['id']) }}">
+                            Alterar
+                        </a>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">Nenhum lançamento.</div>
+    {% endif %}
+</section>
+
 {% endblock %}

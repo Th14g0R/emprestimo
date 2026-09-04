@@ -71,13 +71,13 @@
     </section>
 
     <section class="card metric-card">
-        <span>Principal em aberto</span>
+        <span>Principal aberto</span>
         <strong>{{ resumo['principal_em_aberto_centavos']|money }}</strong>
         <small>Capital que ainda permanece emprestado.</small>
     </section>
 
     <section class="card metric-card">
-        <span>Juros/documentos em aberto</span>
+        <span>Juros em aberto</span>
         <strong>{{ resumo['juros_em_aberto_centavos']|money }}</strong>
         <small>Títulos PREVISTO/VENCIDO ainda pendentes.</small>
     </section>
@@ -108,7 +108,7 @@
                     <th>Data</th>
                     <th>Taxa</th>
                     <th class="text-right">Original</th>
-                    <th class="text-right">Principal em aberto</th>
+                    <th class="text-right">Principal aberto</th>
                     <th class="text-right">Juros em aberto</th>
                     <th class="text-right">Total a receber</th>
                     <th class="text-right">Juros já recebidos</th>
@@ -167,12 +167,12 @@
                 <tr>
                     <th>Competência</th>
                     <th class="text-right">Juros esperados</th>
-                    <th class="text-right">Pago da competência</th>
-                    <th class="text-right">Falta da competência</th>
-                    <th>Datas em que foi pago</th>
-                    <th>Situação competência</th>
-                    <th class="text-right">Juros recebidos no mês</th>
-                    <th class="text-right">Total recebido no mês</th>
+                    <th class="text-right">Pago competência</th>
+                    <th class="text-right">Falta</th>
+                    <th>Datas pagas</th>
+                    <th>Situação comp.</th>
+                    <th class="text-right">Juros no mês</th>
+                    <th class="text-right">Total no mês</th>
                     <th>Situação caixa</th>
                 </tr>
             </thead>
@@ -314,7 +314,7 @@
                     <th>Contrato</th>
                     <th>Histórico</th>
                     <th>Competência</th>
-                    <th>Mês pagamento</th>
+                    <th>Mês pgto.</th>
                     <th class="text-right">Entrada</th>
                     <th class="text-right">Saída</th>
                     <th class="text-right">Principal após</th>

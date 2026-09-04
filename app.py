@@ -26,7 +26,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "18.0-client-statement-report"
+APP_VERSION = "19.0-ui-card-edit"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -5415,7 +5415,23 @@ def register_routes(app: Flask) -> None:
         lancamentos = db.execute(
             """
             SELECT lc.id, lc.descricao, lc.valor_total_centavos, lc.quantidade_parcelas,
-                   lc.data_compra, u.nome AS usuario_nome
+                   lc.data_compra, u.nome AS usuario_nome,
+                   (
+                       SELECT MIN(pc.vencimento)
+                         FROM parcelas_cartao pc
+                        WHERE pc.lancamento_cartao_id = lc.id
+                   ) AS primeiro_vencimento,
+                   (
+                       SELECT COUNT(*)
+                         FROM parcelas_cartao pc
+                        WHERE pc.lancamento_cartao_id = lc.id
+                          AND pc.status = 'PAGO'
+                   ) AS parcelas_pagas,
+                   (
+                       SELECT COUNT(*)
+                         FROM parcelas_cartao pc
+                        WHERE pc.lancamento_cartao_id = lc.id
+                   ) AS parcelas_geradas
               FROM lancamentos_cartao lc
               LEFT JOIN usuarios u ON u.id = lc.usuario_id
              WHERE lc.cartao_credito_id = ?
@@ -5554,6 +5570,324 @@ def register_routes(app: Flask) -> None:
                     return redirect(url_for("cartoes_detalhe", cartao_id=cartao_id))
 
         return render_template("cartoes/lancamento_form.html", cartao=cartao, form=form)
+
+    @app.route(
+        "/lancamentos-cartao/<int:lancamento_id>/editar",
+        methods=["GET", "POST"],
+    )
+    @login_required
+    def cartoes_lancamento_editar(lancamento_id: int):
+        db = get_db()
+        refresh_overdue_card_installments(db)
+
+        lancamento = db.execute(
+            """
+            SELECT lc.*,
+                   cc.id AS cartao_id,
+                   cc.descricao AS cartao_descricao,
+                   cc.cliente_id,
+                   c.nome AS cliente_nome,
+                   (
+                       SELECT MIN(pc.vencimento)
+                         FROM parcelas_cartao pc
+                        WHERE pc.lancamento_cartao_id = lc.id
+                   ) AS primeiro_vencimento,
+                   (
+                       SELECT COUNT(*)
+                         FROM parcelas_cartao pc
+                        WHERE pc.lancamento_cartao_id = lc.id
+                          AND pc.status = 'PAGO'
+                   ) AS parcelas_pagas,
+                   (
+                       SELECT COUNT(*)
+                         FROM parcelas_cartao pc
+                        WHERE pc.lancamento_cartao_id = lc.id
+                   ) AS parcelas_geradas
+              FROM lancamentos_cartao lc
+              JOIN cartoes_credito cc ON cc.id = lc.cartao_credito_id
+              JOIN clientes c ON c.id = cc.cliente_id
+             WHERE lc.id = ?
+            """,
+            (lancamento_id,),
+        ).fetchone()
+
+        if lancamento is None:
+            abort(404)
+
+        parcelas_antes = db.execute(
+            """
+            SELECT id, numero_parcela, valor_centavos, vencimento,
+                   status, data_pagamento
+              FROM parcelas_cartao
+             WHERE lancamento_cartao_id = ?
+             ORDER BY numero_parcela
+            """,
+            (lancamento_id,),
+        ).fetchall()
+
+        bloqueio_financeiro = int(lancamento["parcelas_pagas"] or 0) > 0
+
+        form = {
+            "descricao": request.form.get(
+                "descricao",
+                lancamento["descricao"],
+            ),
+            "valor_total": request.form.get(
+                "valor_total",
+                format_money(lancamento["valor_total_centavos"]).replace("R$ ", ""),
+            ),
+            "quantidade_parcelas": request.form.get(
+                "quantidade_parcelas",
+                str(lancamento["quantidade_parcelas"]),
+            ),
+            "data_compra": request.form.get(
+                "data_compra",
+                lancamento["data_compra"],
+            ),
+            "primeiro_vencimento": request.form.get(
+                "primeiro_vencimento",
+                lancamento["primeiro_vencimento"] or "",
+            ),
+            "motivo_alteracao": request.form.get("motivo_alteracao", ""),
+        }
+
+        if request.method == "POST":
+            descricao = form["descricao"].strip()
+            motivo = form["motivo_alteracao"].strip()
+            senha = request.form.get("senha_confirmacao", "")
+            errors: list[str] = []
+
+            if len(descricao) < 2:
+                errors.append("Informe a descrição da compra.")
+
+            if len(motivo) < 5:
+                errors.append(
+                    "Informe o motivo da alteração com pelo menos 5 caracteres."
+                )
+
+            if not validar_senha_usuario_atual(senha):
+                errors.append(
+                    "A senha de confirmação do usuário logado é inválida."
+                )
+
+            valor_centavos = int(lancamento["valor_total_centavos"])
+            quantidade = int(lancamento["quantidade_parcelas"])
+            data_compra = date.fromisoformat(lancamento["data_compra"])
+            primeiro_vencimento = (
+                date.fromisoformat(lancamento["primeiro_vencimento"])
+                if lancamento["primeiro_vencimento"]
+                else data_compra
+            )
+
+            if not bloqueio_financeiro:
+                valor_centavos = parse_money_to_centavos(form["valor_total"]) or 0
+                quantidade = parse_int(form["quantidade_parcelas"]) or 0
+                data_compra_parsed = parse_iso_date(form["data_compra"])
+                primeiro_vencimento_parsed = parse_iso_date(
+                    form["primeiro_vencimento"]
+                )
+
+                if valor_centavos <= 0:
+                    errors.append("Informe um valor total maior que zero.")
+
+                if quantidade < 1 or quantidade > 120:
+                    errors.append(
+                        "A quantidade de parcelas deve estar entre 1 e 120."
+                    )
+
+                if data_compra_parsed is None:
+                    errors.append("Informe uma data de compra válida.")
+
+                if primeiro_vencimento_parsed is None:
+                    errors.append("Informe o primeiro vencimento.")
+
+                if (
+                    data_compra_parsed is not None
+                    and primeiro_vencimento_parsed is not None
+                    and primeiro_vencimento_parsed < data_compra_parsed
+                ):
+                    errors.append(
+                        "O primeiro vencimento não pode ser anterior à compra."
+                    )
+
+                if data_compra_parsed is not None:
+                    data_compra = data_compra_parsed
+
+                if primeiro_vencimento_parsed is not None:
+                    primeiro_vencimento = primeiro_vencimento_parsed
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                before = {
+                    "lancamento": {
+                        "id": int(lancamento["id"]),
+                        "descricao": lancamento["descricao"],
+                        "valor_total_centavos": int(
+                            lancamento["valor_total_centavos"]
+                        ),
+                        "quantidade_parcelas": int(
+                            lancamento["quantidade_parcelas"]
+                        ),
+                        "data_compra": lancamento["data_compra"],
+                        "primeiro_vencimento": lancamento["primeiro_vencimento"],
+                    },
+                    "parcelas": [dict(row) for row in parcelas_antes],
+                }
+
+                try:
+                    if bloqueio_financeiro:
+                        db.execute(
+                            """
+                            UPDATE lancamentos_cartao
+                               SET descricao = ?
+                             WHERE id = ?
+                            """,
+                            (descricao, lancamento_id),
+                        )
+                    else:
+                        db.execute(
+                            """
+                            DELETE FROM parcelas_cartao
+                             WHERE lancamento_cartao_id = ?
+                            """,
+                            (lancamento_id,),
+                        )
+
+                        db.execute(
+                            """
+                            UPDATE lancamentos_cartao
+                               SET descricao = ?,
+                                   valor_total_centavos = ?,
+                                   quantidade_parcelas = ?,
+                                   data_compra = ?
+                             WHERE id = ?
+                            """,
+                            (
+                                descricao,
+                                valor_centavos,
+                                quantidade,
+                                data_compra.isoformat(),
+                                lancamento_id,
+                            ),
+                        )
+
+                        valores = split_centavos(valor_centavos, quantidade)
+
+                        for index, valor_parcela in enumerate(valores):
+                            vencimento = add_months_iso(
+                                primeiro_vencimento,
+                                index,
+                            )
+                            status_inicial = (
+                                "VENCIDO"
+                                if vencimento < date.today()
+                                else "PENDENTE"
+                            )
+
+                            db.execute(
+                                """
+                                INSERT INTO parcelas_cartao (
+                                    lancamento_cartao_id,
+                                    numero_parcela,
+                                    valor_centavos,
+                                    vencimento,
+                                    status
+                                ) VALUES (?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    lancamento_id,
+                                    index + 1,
+                                    valor_parcela,
+                                    vencimento.isoformat(),
+                                    status_inicial,
+                                ),
+                            )
+
+                    parcelas_depois = db.execute(
+                        """
+                        SELECT id, numero_parcela, valor_centavos, vencimento,
+                               status, data_pagamento
+                          FROM parcelas_cartao
+                         WHERE lancamento_cartao_id = ?
+                         ORDER BY numero_parcela
+                        """,
+                        (lancamento_id,),
+                    ).fetchall()
+
+                    after = {
+                        "lancamento": {
+                            "id": lancamento_id,
+                            "descricao": descricao,
+                            "valor_total_centavos": valor_centavos,
+                            "quantidade_parcelas": quantidade,
+                            "data_compra": data_compra.isoformat(),
+                            "primeiro_vencimento": (
+                                primeiro_vencimento.isoformat()
+                                if primeiro_vencimento
+                                else None
+                            ),
+                            "bloqueio_financeiro": bloqueio_financeiro,
+                        },
+                        "parcelas": [dict(row) for row in parcelas_depois],
+                    }
+
+                    registrar_auditoria(
+                        db,
+                        "lancamento_cartao",
+                        lancamento_id,
+                        "ALTERADO",
+                        json.dumps(
+                            {
+                                "motivo": motivo,
+                                "antes": before,
+                                "depois": after,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            default=str,
+                        ),
+                    )
+
+                    db.commit()
+
+                except sqlite3.DatabaseError as exc:
+                    db.rollback()
+                    app.logger.exception(
+                        "Erro ao alterar lançamento do cartão"
+                    )
+                    flash(
+                        f"Não foi possível alterar o lançamento: {exc}",
+                        "danger",
+                    )
+                else:
+                    if bloqueio_financeiro:
+                        flash(
+                            "Descrição do lançamento alterada. "
+                            "Os dados financeiros permaneceram preservados "
+                            "porque já existem parcelas pagas.",
+                            "success",
+                        )
+                    else:
+                        flash(
+                            "Lançamento alterado e parcelamento recalculado.",
+                            "success",
+                        )
+
+                    return redirect(
+                        url_for(
+                            "cartoes_detalhe",
+                            cartao_id=lancamento["cartao_id"],
+                        )
+                    )
+
+        return render_template(
+            "cartoes/lancamento_editar.html",
+            lancamento=lancamento,
+            form=form,
+            bloqueio_financeiro=bloqueio_financeiro,
+        )
 
     @app.route("/parcelas-cartao/<int:parcela_id>/pagar", methods=["GET", "POST"])
     @login_required

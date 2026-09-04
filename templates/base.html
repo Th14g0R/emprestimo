@@ -11,19 +11,40 @@
     <header class="topbar">
         <div class="container topbar-content">
             <a class="brand" href="{{ url_for('dashboard') }}">Empréstimos</a>
-            <nav class="nav">
-                <a href="{{ url_for('dashboard') }}">Dashboard</a>
-                <a href="{{ url_for('clientes_lista') }}">Clientes</a>
-                <a href="{{ url_for('relatorio_cliente') }}">Extrato</a>
-                <a href="{{ url_for('emprestimos_lista') }}">Empréstimos</a>
-                <a href="{{ url_for('movimentacoes_lista') }}">Movimentações</a>
-                <a href="{{ url_for('pagamentos_integrados_lista') }}">Pagamentos integrados</a>
-                <a href="{{ url_for('titulos_receber_lista') }}">A Receber</a>
-                <a href="{{ url_for('contas_lista') }}">Contas</a>
-                <a href="{{ url_for('cartoes_lista') }}">Cartões</a>
+
+            <nav class="nav" aria-label="Menu principal">
+                <a class="{{ 'active' if request.endpoint == 'dashboard' else '' }}"
+                   href="{{ url_for('dashboard') }}">Dashboard</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('clientes_') else '' }}"
+                   href="{{ url_for('clientes_lista') }}">Clientes</a>
+
+                <a class="{{ 'active' if request.endpoint == 'relatorio_cliente' else '' }}"
+                   href="{{ url_for('relatorio_cliente') }}">Extrato</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('emprestimos_') else '' }}"
+                   href="{{ url_for('emprestimos_lista') }}">Empréstimos</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('movimentacoes_') else '' }}"
+                   href="{{ url_for('movimentacoes_lista') }}"
+                   title="Movimentações">Movimentos</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('pagamentos_integrados_') else '' }}"
+                   href="{{ url_for('pagamentos_integrados_lista') }}"
+                   title="Pagamentos integrados">Pg. integrados</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('titulos_receber_') else '' }}"
+                   href="{{ url_for('titulos_receber_lista') }}">A receber</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('contas_') else '' }}"
+                   href="{{ url_for('contas_lista') }}">Contas</a>
+
+                <a class="{{ 'active' if request.endpoint and (request.endpoint.startswith('cartoes_') or request.endpoint.startswith('parcelas_cartao_')) else '' }}"
+                   href="{{ url_for('cartoes_lista') }}">Cartões</a>
             </nav>
+
             <div class="user-menu">
-                <span>{{ g.usuario['nome'] }}</span>
+                <span class="user-name" title="{{ g.usuario['nome'] }}">{{ g.usuario['nome'] }}</span>
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button class="button button-light button-small" type="submit">Sair</button>
