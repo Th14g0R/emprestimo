@@ -27,7 +27,7 @@
     </div>
 </div>
 
-<div class="metrics-grid client-position-metrics">
+<div class="metrics-grid client-position-metrics client-position-metrics-6">
     <section class="card metric-card">
         <span>Total histórico emprestado</span>
         <strong>{{ resumo_financeiro['total_historico_emprestado_centavos']|money }}</strong>
@@ -36,9 +36,17 @@
         <span>Principal em aberto</span>
         <strong>{{ resumo_financeiro['principal_em_aberto_centavos']|money }}</strong>
     </section>
-    <section class="card metric-card">
-        <span>Juros em aberto</span>
-        <strong>{{ resumo_financeiro['juros_em_aberto_centavos']|money }}</strong>
+    <section class="card metric-card metric-card-overdue">
+        <span>Em aberto vencido</span>
+        <strong>{{ resumo_financeiro['juros_vencidos_centavos']|money }}</strong>
+    </section>
+    <section class="card metric-card metric-card-current">
+        <span>Em aberto deste mês</span>
+        <strong>{{ resumo_financeiro['juros_mes_atual_centavos']|money }}</strong>
+    </section>
+    <section class="card metric-card metric-card-future">
+        <span>Em aberto futuros</span>
+        <strong>{{ resumo_financeiro['juros_futuros_centavos']|money }}</strong>
     </section>
     <section class="card metric-card">
         <span>Total a receber</span>
@@ -74,7 +82,7 @@
 
         {% if emprestimos %}
         <div class="table-responsive">
-            <table>
+            <table data-sortable="true">
                 <thead>
                     <tr>
                         <th>#</th>
@@ -118,7 +126,7 @@
 
     {% if contas_bancarias %}
     <div class="table-responsive">
-        <table>
+        <table data-sortable="true">
             <thead><tr><th>Banco</th><th>Descrição</th><th>PIX</th><th>Ag./Conta</th><th>Status</th><th></th></tr></thead>
             <tbody>
             {% for conta in contas_bancarias %}
@@ -152,7 +160,7 @@
 
     {% if cartoes %}
     <div class="table-responsive">
-        <table>
+        <table data-sortable="true">
             <thead><tr><th>Descrição</th><th>Status</th></tr></thead>
             <tbody>
             {% for cartao in cartoes %}

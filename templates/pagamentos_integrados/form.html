@@ -123,7 +123,7 @@
                             {% if titulo['descricao'] %}<br><small>{{ titulo['descricao'] }}</small>{% endif %}
                         </td>
                         <td>{{ titulo['competencia']|competencia_br }}</td>
-                        <td><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></td>
+                        <td><span class="badge badge-{{ titulo['status']|titulo_status|lower }}">{{ titulo['status']|titulo_status }}</span></td>
                         <td>{{ titulo['saldo_base_centavos']|money }}</td>
                         <td>{{ titulo['taxa_juros_mensal']|percent_br }}</td>
                         <td class="text-right"><strong>{{ titulo['valor_previsto_centavos']|money }}</strong></td>

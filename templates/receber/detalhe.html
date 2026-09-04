@@ -24,7 +24,7 @@
     <h2>Documento</h2>
     <dl class="details">
         <dt>Status</dt>
-        <dd><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></dd>
+        <dd><span class="badge badge-{{ titulo['status']|titulo_status|lower }}">{{ titulo['status']|titulo_status }}</span></dd>
 
         <dt>Natureza</dt>
         <dd>{{ 'SALDO DE JUROS' if titulo['natureza'] == 'SALDO_JUROS' else 'JUROS' }}</dd>
@@ -73,7 +73,7 @@
             <a class="related-title-card" href="{{ url_for('titulos_receber_detalhe', titulo_id=saldo['id']) }}">
                 <span>#{{ saldo['id'] }} · sequência {{ saldo['sequencia'] }}</span>
                 <strong>{{ saldo['valor_previsto_centavos']|money }}</strong>
-                <span class="badge badge-{{ saldo['status']|lower }}">{{ saldo['status'] }}</span>
+                <span class="badge badge-{{ saldo['status']|titulo_status|lower }}">{{ saldo['status']|titulo_status }}</span>
             </a>
         {% endfor %}
     </div>

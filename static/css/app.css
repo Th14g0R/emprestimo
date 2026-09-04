@@ -1630,3 +1630,92 @@ tbody tr:hover {
         text-decoration: none !important;
     }
 }
+
+
+/* V21 - relatórios, pendências e ordenação */
+.statement-metrics-6,
+.client-position-metrics-6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-card-overdue {
+    border-left: 4px solid #dc2626;
+}
+
+.metric-card-current {
+    border-left: 4px solid #d97706;
+}
+
+.metric-card-future {
+    border-left: 4px solid #2563eb;
+}
+
+.badge-pendente,
+.statement-status-pendente,
+.statement-status-aguardando {
+    background: #e0f2fe;
+    color: #075985;
+}
+
+.sortable-header {
+    position: relative;
+    padding-right: 22px !important;
+    cursor: pointer;
+    user-select: none;
+}
+
+.sortable-header::after {
+    content: "↕";
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #94a3b8;
+    font-size: .9em;
+}
+
+.sortable-header[data-sort-direction="asc"]::after {
+    content: "▲";
+    color: #2563eb;
+}
+
+.sortable-header[data-sort-direction="desc"]::after {
+    content: "▼";
+    color: #2563eb;
+}
+
+.sortable-header:hover,
+.sortable-header:focus-visible {
+    background: #edf2f8;
+    color: #1d4ed8;
+    outline: none;
+}
+
+@media (max-width: 1000px) {
+    .statement-metrics-6,
+    .client-position-metrics-6 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .statement-metrics-6,
+    .client-position-metrics-6 {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media print {
+    .statement-metrics-6,
+    .client-position-metrics-6 {
+        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    }
+
+    .sortable-header {
+        padding-right: 1mm !important;
+    }
+
+    .sortable-header::after {
+        display: none !important;
+    }
+}

@@ -31,7 +31,7 @@
 
         <select name="status">
             <option value="abertos" {{ 'selected' if status == 'abertos' }}>Em aberto</option>
-            <option value="previsto" {{ 'selected' if status == 'previsto' }}>Previstos</option>
+            <option value="previsto" {{ 'selected' if status == 'previsto' }}>Pendentes</option>
             <option value="vencido" {{ 'selected' if status == 'vencido' }}>Vencidos</option>
             <option value="parcial" {{ 'selected' if status == 'parcial' }}>Parciais</option>
             <option value="recebido" {{ 'selected' if status == 'recebido' }}>Recebidos</option>
@@ -68,7 +68,7 @@
 <section class="card table-card">
 {% if titulos %}
 <div class="table-responsive">
-<table class="receivables-table">
+<table class="receivables-table" data-sortable="true">
     <thead>
         <tr>
             <th>Vencimento</th>
@@ -106,7 +106,7 @@
                     <br><small>recebido {{ titulo['valor_recebido_centavos']|money }}</small>
                 {% endif %}
             </td>
-            <td><span class="badge badge-{{ titulo['status']|lower }}">{{ titulo['status'] }}</span></td>
+            <td><span class="badge badge-{{ titulo['status']|titulo_status|lower }}">{{ titulo['status']|titulo_status }}</span></td>
             <td class="nowrap">{{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}</td>
             <td>{{ titulo['observacao'] or '-' }}</td>
             <td>

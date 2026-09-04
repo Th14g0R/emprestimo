@@ -26,7 +26,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "20.0-card-name-edit"
+APP_VERSION = "21.0-report-status-sort"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -798,6 +798,7 @@ def register_template_filters(app: Flask) -> None:
     app.add_template_filter(format_date_br, "date_br")
     app.add_template_filter(format_percent_br, "percent_br")
     app.add_template_filter(format_competencia_br, "competencia_br")
+    app.add_template_filter(format_titulo_status, "titulo_status")
 
 
 def get_csrf_token() -> str:
@@ -931,6 +932,14 @@ def format_date_br(value: Any) -> str:
         return date.fromisoformat(text[:10]).strftime("%d/%m/%Y")
     except (ValueError, TypeError):
         return text
+
+
+def format_titulo_status(value: Any) -> str:
+    """PREVISTO continua no banco, mas é exibido como PENDENTE."""
+    text = str(value or "").strip().upper()
+    if text == "PREVISTO":
+        return "PENDENTE"
+    return text or "-"
 
 
 def format_percent_br(value: Any) -> str:
@@ -6261,19 +6270,17 @@ def resumo_financeiro_cliente(
     db: sqlite3.Connection,
     cliente_id: int,
 ) -> dict[str, int]:
-    """
-    Posição atual do cliente.
+    """Posição atual do cliente, com documentos em aberto por faixa."""
+    today = date.today()
+    today_iso = today.isoformat()
+    month_end_iso = last_day_of_month(today).isoformat()
 
-    - total_historico_emprestado: soma dos contratos já concedidos;
-    - principal_em_aberto: capital ainda emprestado hoje;
-    - juros_em_aberto: documentos PREVISTO/VENCIDO ainda pendentes;
-    - total_a_receber: principal + juros em aberto.
-    """
     emprestimos = db.execute(
         """
         SELECT
             COUNT(*) AS quantidade_emprestimos,
-            COALESCE(SUM(valor_original_centavos), 0) AS total_historico_emprestado_centavos,
+            COALESCE(SUM(valor_original_centavos), 0)
+                AS total_historico_emprestado_centavos,
             COALESCE(SUM(
                 CASE
                     WHEN status <> 'QUITADO'
@@ -6289,26 +6296,69 @@ def resumo_financeiro_cliente(
 
     juros = db.execute(
         """
-        SELECT COALESCE(SUM(t.valor_previsto_centavos), 0) AS juros_em_aberto_centavos
+        SELECT
+            COALESCE(SUM(
+                CASE
+                    WHEN t.data_vencimento < ?
+                    THEN t.valor_previsto_centavos
+                    ELSE 0
+                END
+            ), 0) AS juros_vencidos_centavos,
+
+            COALESCE(SUM(
+                CASE
+                    WHEN t.data_vencimento >= ?
+                     AND t.data_vencimento <= ?
+                    THEN t.valor_previsto_centavos
+                    ELSE 0
+                END
+            ), 0) AS juros_mes_atual_centavos,
+
+            COALESCE(SUM(
+                CASE
+                    WHEN t.data_vencimento > ?
+                    THEN t.valor_previsto_centavos
+                    ELSE 0
+                END
+            ), 0) AS juros_futuros_centavos
           FROM titulos_receber t
           JOIN emprestimos e ON e.id = t.emprestimo_id
          WHERE e.cliente_id = ?
            AND t.status IN ('PREVISTO', 'VENCIDO')
         """,
-        (cliente_id,),
+        (
+            today_iso,
+            today_iso,
+            month_end_iso,
+            month_end_iso,
+            cliente_id,
+        ),
     ).fetchone()
 
-    total_historico = int(emprestimos["total_historico_emprestado_centavos"] or 0)
-    principal = int(emprestimos["principal_em_aberto_centavos"] or 0)
-    juros_abertos = int(juros["juros_em_aberto_centavos"] or 0)
+    total_historico = int(
+        emprestimos["total_historico_emprestado_centavos"] or 0
+    )
+    principal = int(
+        emprestimos["principal_em_aberto_centavos"] or 0
+    )
+    juros_vencidos = int(juros["juros_vencidos_centavos"] or 0)
+    juros_mes = int(juros["juros_mes_atual_centavos"] or 0)
+    juros_futuros = int(juros["juros_futuros_centavos"] or 0)
+    juros_abertos = juros_vencidos + juros_mes + juros_futuros
 
     return {
-        "quantidade_emprestimos": int(emprestimos["quantidade_emprestimos"] or 0),
+        "quantidade_emprestimos": int(
+            emprestimos["quantidade_emprestimos"] or 0
+        ),
         "total_historico_emprestado_centavos": total_historico,
         "principal_em_aberto_centavos": principal,
+        "juros_vencidos_centavos": juros_vencidos,
+        "juros_mes_atual_centavos": juros_mes,
+        "juros_futuros_centavos": juros_futuros,
         "juros_em_aberto_centavos": juros_abertos,
         "total_a_receber_centavos": principal + juros_abertos,
     }
+
 
 
 def posicao_emprestimos_cliente(
@@ -6469,6 +6519,8 @@ def conferencia_mensal_cliente(
             "pendente_centavos": 0,
             "contratos_previstos": 0,
             "contratos_pendentes": 0,
+            "pendente_vencido_centavos": 0,
+            "pendente_futuro_centavos": 0,
             "datas_pagamento": set(),
         }
         for competencia in competencias
@@ -6535,6 +6587,12 @@ def conferencia_mensal_cliente(
 
             if pendente > 0:
                 agregado["contratos_pendentes"] += 1
+
+                if vencimento < date.today():
+                    agregado["pendente_vencido_centavos"] += pendente
+                else:
+                    agregado["pendente_futuro_centavos"] += pendente
+
                 pendencias.append(
                     {
                         "competencia": competencia,
@@ -6548,9 +6606,13 @@ def conferencia_mensal_cliente(
                         "pendente_centavos": pendente,
                         "datas_pagamento": datas,
                         "situacao": (
-                            "SEM PAGAMENTO"
-                            if recebido == 0
-                            else "PARCIAL"
+                            "PENDENTE"
+                            if vencimento >= date.today()
+                            else (
+                                "SEM PAGAMENTO"
+                                if recebido == 0
+                                else "PARCIAL"
+                            )
                         ),
                     }
                 )
@@ -6572,22 +6634,48 @@ def conferencia_mensal_cliente(
         recebido_comp = int(row["recebido_competencia_centavos"])
         pendente = int(row["pendente_centavos"])
 
-        if esperado <= 0:
-            situacao_competencia = "SEM PREVISÃO"
-        elif recebido_comp == 0:
-            situacao_competencia = "SEM PAGAMENTO"
-        elif pendente > 0:
-            situacao_competencia = "PARCIAL"
-        elif recebido_comp > esperado:
-            situacao_competencia = "A MAIOR"
-        else:
-            situacao_competencia = "PAGO"
+        pendente_vencido = int(row["pendente_vencido_centavos"])
+        pendente_futuro = int(row["pendente_futuro_centavos"])
 
         juros_mes = int(caixa["juros_recebidos_centavos"])
         total_mes = int(caixa["total_recebido_centavos"])
 
+        # Omite meses artificiais sem previsão e sem movimento,
+        # como o mês inicial antes do primeiro vencimento.
+        if (
+            esperado == 0
+            and recebido_comp == 0
+            and pendente == 0
+            and juros_mes == 0
+            and total_mes == 0
+        ):
+            continue
+
+        if esperado <= 0:
+            situacao_competencia = "SEM PREVISÃO"
+        elif recebido_comp > esperado:
+            situacao_competencia = "A MAIOR"
+        elif pendente == 0:
+            situacao_competencia = "PAGO"
+        elif pendente_vencido > 0:
+            situacao_competencia = (
+                "SEM PAGAMENTO"
+                if recebido_comp == 0
+                else "PARCIAL"
+            )
+        else:
+            situacao_competencia = "PENDENTE"
+
         if total_mes == 0:
-            situacao_caixa = "SEM RECEBIMENTO"
+            situacao_caixa = (
+                "AGUARDANDO"
+                if pendente_vencido == 0
+                and (
+                    competencia >= date.today().strftime("%Y-%m")
+                    or pendente_futuro > 0
+                )
+                else "SEM RECEBIMENTO"
+            )
         elif juros_mes == 0:
             situacao_caixa = "SEM JUROS"
         else:

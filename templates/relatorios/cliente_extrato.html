@@ -63,7 +63,7 @@
     <span>Período: {{ data_inicio|date_br }} a {{ data_fim|date_br }}</span>
 </div>
 
-<div class="metrics-grid statement-metrics">
+<div class="metrics-grid statement-metrics statement-metrics-6">
     <section class="card metric-card">
         <span>Total histórico emprestado</span>
         <strong>{{ resumo['total_historico_emprestado_centavos']|money }}</strong>
@@ -76,16 +76,28 @@
         <small>Capital que ainda permanece emprestado.</small>
     </section>
 
-    <section class="card metric-card">
-        <span>Juros em aberto</span>
-        <strong>{{ resumo['juros_em_aberto_centavos']|money }}</strong>
-        <small>Títulos PREVISTO/VENCIDO ainda pendentes.</small>
+    <section class="card metric-card metric-card-overdue">
+        <span>Em aberto vencido</span>
+        <strong>{{ resumo['juros_vencidos_centavos']|money }}</strong>
+        <small>Vencimento anterior a hoje.</small>
+    </section>
+
+    <section class="card metric-card metric-card-current">
+        <span>Em aberto deste mês</span>
+        <strong>{{ resumo['juros_mes_atual_centavos']|money }}</strong>
+        <small>De hoje até o fim do mês.</small>
+    </section>
+
+    <section class="card metric-card metric-card-future">
+        <span>Em aberto futuros</span>
+        <strong>{{ resumo['juros_futuros_centavos']|money }}</strong>
+        <small>Vencimentos após este mês.</small>
     </section>
 
     <section class="card metric-card">
         <span>Total a receber</span>
         <strong>{{ resumo['total_a_receber_centavos']|money }}</strong>
-        <small>Principal em aberto + juros/documentos em aberto.</small>
+        <small>Principal aberto + todos os documentos em aberto.</small>
     </section>
 </div>
 
@@ -101,7 +113,7 @@
 
     {% if emprestimos %}
     <div class="table-responsive">
-        <table class="statement-loans-table">
+        <table class="statement-loans-table" data-sortable="true">
             <thead>
                 <tr>
                     <th>Contrato</th>
@@ -162,7 +174,7 @@
 
     {% if conferencia_mensal %}
     <div class="table-responsive">
-        <table class="monthly-check-table">
+        <table class="monthly-check-table" data-sortable="true">
             <thead>
                 <tr>
                     <th>Competência</th>
@@ -225,7 +237,7 @@
 
     {% if pendencias_competencia %}
     <div class="table-responsive">
-        <table>
+        <table data-sortable="true">
             <thead>
                 <tr>
                     <th>Competência</th>
@@ -307,7 +319,7 @@
 
     {% if extrato %}
     <div class="table-responsive">
-        <table class="bank-statement-table">
+        <table class="bank-statement-table" data-sortable="true">
             <thead>
                 <tr>
                     <th>Data</th>
