@@ -26,7 +26,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "19.0-ui-card-edit"
+APP_VERSION = "20.0-card-name-edit"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -5471,6 +5471,137 @@ def register_routes(app: Flask) -> None:
             "cartoes/detalhe.html", cartao=cartao, lancamentos=lancamentos,
             parcelas=parcelas, resumo=resumo,
         )
+
+    @app.route("/cartoes/<int:cartao_id>/editar", methods=["GET", "POST"])
+    @login_required
+    def cartoes_editar(cartao_id: int):
+        db = get_db()
+
+        cartao = db.execute(
+            """
+            SELECT cc.id, cc.cliente_id, cc.descricao, cc.ativo,
+                   cc.created_at, cc.updated_at,
+                   c.nome AS cliente_nome
+              FROM cartoes_credito cc
+              JOIN clientes c ON c.id = cc.cliente_id
+             WHERE cc.id = ?
+            """,
+            (cartao_id,),
+        ).fetchone()
+
+        if cartao is None:
+            abort(404)
+
+        form = {
+            "descricao": request.form.get(
+                "descricao",
+                cartao["descricao"],
+            ),
+            "motivo_alteracao": request.form.get(
+                "motivo_alteracao",
+                "",
+            ),
+        }
+
+        if request.method == "POST":
+            descricao = form["descricao"].strip()
+            motivo = form["motivo_alteracao"].strip()
+            senha = request.form.get("senha_confirmacao", "")
+            errors: list[str] = []
+
+            if len(descricao) < 2:
+                errors.append(
+                    "Informe o nome do cartão com pelo menos 2 caracteres."
+                )
+
+            if len(descricao) > 120:
+                errors.append(
+                    "O nome do cartão deve ter no máximo 120 caracteres."
+                )
+
+            if len(motivo) < 5:
+                errors.append(
+                    "Informe o motivo da alteração com pelo menos 5 caracteres."
+                )
+
+            if not validar_senha_usuario_atual(senha):
+                errors.append(
+                    "A senha de confirmação do usuário logado é inválida."
+                )
+
+            if errors:
+                for error in errors:
+                    flash(error, "danger")
+            else:
+                before = {
+                    "id": int(cartao["id"]),
+                    "cliente_id": int(cartao["cliente_id"]),
+                    "cliente_nome": cartao["cliente_nome"],
+                    "descricao": cartao["descricao"],
+                    "ativo": int(cartao["ativo"]),
+                }
+
+                after = {
+                    **before,
+                    "descricao": descricao,
+                }
+
+                try:
+                    db.execute(
+                        """
+                        UPDATE cartoes_credito
+                           SET descricao = ?,
+                               updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                        """,
+                        (descricao, cartao_id),
+                    )
+
+                    registrar_auditoria(
+                        db,
+                        "cartao_credito",
+                        cartao_id,
+                        "ALTERADO",
+                        json.dumps(
+                            {
+                                "motivo": motivo,
+                                "antes": before,
+                                "depois": after,
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ),
+                    )
+
+                    db.commit()
+
+                except sqlite3.DatabaseError as exc:
+                    db.rollback()
+                    app.logger.exception(
+                        "Erro ao alterar nome do cartão"
+                    )
+                    flash(
+                        f"Não foi possível alterar o cartão: {exc}",
+                        "danger",
+                    )
+                else:
+                    flash(
+                        f"Cartão alterado para “{descricao}”.",
+                        "success",
+                    )
+                    return redirect(
+                        url_for(
+                            "cartoes_detalhe",
+                            cartao_id=cartao_id,
+                        )
+                    )
+
+        return render_template(
+            "cartoes/editar.html",
+            cartao=cartao,
+            form=form,
+        )
+
 
     @app.post("/cartoes/<int:cartao_id>/status")
     @login_required

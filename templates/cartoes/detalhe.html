@@ -14,6 +14,11 @@
     </div>
 
     <div class="actions wrap-actions">
+        <a class="button button-secondary"
+           href="{{ url_for('cartoes_editar', cartao_id=cartao['id']) }}">
+            Editar cartão
+        </a>
+
         {% if cartao['ativo'] %}
             <a class="button" href="{{ url_for('cartoes_lancamento_novo', cartao_id=cartao['id']) }}">
                 Novo lançamento

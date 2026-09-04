@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Editar cartão - {{ cartao['descricao'] }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Editar cartão</h1>
+        <p class="muted">
+            {{ cartao['cliente_nome'] }} · cartão #{{ cartao['id'] }}
+        </p>
+    </div>
+    <a class="button button-light"
+       href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">
+        Voltar
+    </a>
+</div>
+
+<section class="card section-card card-edit-card">
+    <form method="post" class="form-grid form-grid-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label class="field-span-2">
+            Nome do cartão
+            <input
+                name="descricao"
+                value="{{ form['descricao'] }}"
+                maxlength="120"
+                required
+                autofocus
+                placeholder="Ex.: Nubank Thiago, C6 Ana, Itaú final 1234"
+            >
+            <small class="field-help">
+                Este nome identifica o cartão nas telas e relatórios.
+                Os lançamentos e parcelas não serão alterados.
+            </small>
+        </label>
+
+        <label class="field-span-2">
+            Motivo da alteração
+            <textarea
+                name="motivo_alteracao"
+                rows="3"
+                minlength="5"
+                maxlength="500"
+                required
+                placeholder="Ex.: Ajuste do nome para facilitar a identificação"
+            >{{ form['motivo_alteracao'] }}</textarea>
+        </label>
+
+        <label class="field-span-2">
+            Confirme sua senha
+            <input
+                type="password"
+                name="senha_confirmacao"
+                required
+                autocomplete="current-password"
+            >
+        </label>
+
+        <div class="form-actions field-span-2">
+            <a class="button button-light"
+               href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">
+                Cancelar
+            </a>
+            <button class="button" type="submit">
+                Salvar nome do cartão
+            </button>
+        </div>
+    </form>
+</section>
+{% endblock %}
