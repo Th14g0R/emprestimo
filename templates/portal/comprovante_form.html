@@ -1,1 +1,57 @@
-{% extends "portal/base.html" %}{% block title %}Enviar comprovante{% endblock %}{% block content %}<div class="page-header"><div><h1>Enviar comprovante</h1><p class="muted">Selecione os títulos pagos e anexe o comprovante.</p></div></div><form method="post" enctype="multipart/form-data" class="card section-card" id="proof-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid form-grid-2"><label>Data do pagamento<input type="date" name="data_pagamento" value="{{ form['data_pagamento'] }}" required></label><label>Comprovante<input type="file" name="comprovante" accept=".pdf,.png,.jpg,.jpeg" required><small class="field-help">PDF, PNG ou JPEG; até 5 MB.</small></label><label class="field-span-2">Observação<textarea name="observacao" rows="3">{{ form['observacao'] }}</textarea></label></div><h2>Títulos pagos</h2><div class="table-responsive"><table><thead><tr><th></th><th>Vencimento</th><th>Contrato</th><th>Competência</th><th class="text-right">Saldo</th><th>Valor pago</th></tr></thead><tbody>{% for t in titulos %}<tr><td><input type="checkbox" class="proof-check" name="titulo_id" value="{{ t['id'] }}"></td><td>{{ t['data_vencimento']|date_br }}</td><td>#{{ t['emprestimo_id'] }}</td><td>{{ t['competencia']|competencia_br }}</td><td class="text-right">{{ t['valor_previsto_centavos']|money }}</td><td><input class="proof-value" name="valor_{{ t['id'] }}" value="{{ linhas[t['id']] }}"></td></tr>{% endfor %}</tbody></table></div><div class="portal-proof-total"><span>Total</span><strong id="proof-total">R$ 0,00</strong></div><div class="form-actions"><a class="button button-light" href="{{ url_for('portal.dashboard') }}">Cancelar</a><button class="button">Enviar para análise</button></div></form><script>(()=>{const f=document.getElementById('proof-form'),n=document.getElementById('proof-total');if(!f||!n)return;const p=v=>{let s=String(v||'').replace(/\s/g,'').replace('R$','');if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');const x=Number(s);return Number.isFinite(x)?x:0};const u=()=>{let t=0;f.querySelectorAll('.proof-check').forEach(c=>{if(c.checked)t+=p(c.closest('tr').querySelector('.proof-value').value)});n.textContent=t.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})};f.addEventListener('input',u);f.addEventListener('change',u);u()})();</script>{% endblock %}
+{% extends "portal/base.html" %}
+{% block title %}Enviar comprovante{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Enviar comprovante</h1>
+        <p class="muted">Um único comprovante pode solicitar a baixa de vários títulos pagos juntos.</p>
+    </div>
+</div>
+<div class="readonly-portal-notice proof-consolidated-notice">
+    <strong>Pagamento consolidado.</strong>
+    <span>Marque todos os títulos pagos na mesma transferência. O total selecionado será enviado em uma única solicitação e só será baixado após a confirmação do administrador.</span>
+</div>
+<form method="post" enctype="multipart/form-data" class="card section-card" id="proof-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-grid form-grid-2">
+        <label>Data do pagamento<input type="date" name="data_pagamento" value="{{ form['data_pagamento'] }}" required></label>
+        <label>Comprovante<input type="file" name="comprovante" accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg" required><small class="field-help">Somente PDF, PNG ou JPEG. Imagens são reduzidas/otimizadas automaticamente; PDFs devem ter até 3 MB.</small></label>
+        <label class="field-span-2">Observação<textarea name="observacao" rows="3" maxlength="500">{{ form['observacao'] }}</textarea></label>
+    </div>
+    <div class="section-title-row portal-proof-title-row">
+        <div><h2>Títulos pagos</h2><p class="muted section-subtitle">Você pode selecionar vários títulos e enviar apenas um comprovante.</p></div>
+        {% if titulos %}<button class="button button-light button-small" type="button" id="proof-select-all">Selecionar todos</button>{% endif %}
+    </div>
+    {% if titulos %}
+    <div class="table-responsive">
+        <table class="portal-proof-table" data-sortable="false">
+            <thead><tr><th></th><th>Vencimento</th><th>Contrato</th><th>Competência</th><th class="text-right">Saldo</th><th>Valor pago</th></tr></thead>
+            <tbody>
+            {% for t in titulos %}
+                <tr>
+                    <td><input type="checkbox" class="proof-check" name="titulo_id" value="{{ t['id'] }}"></td>
+                    <td>{{ t['data_vencimento']|date_br }}</td>
+                    <td>#{{ t['emprestimo_id'] }}</td>
+                    <td>{{ t['competencia']|competencia_br }}</td>
+                    <td class="text-right"><strong>{{ t['valor_previsto_centavos']|money }}</strong></td>
+                    <td><input class="proof-value" name="valor_{{ t['id'] }}" value="{{ linhas[t['id']] }}" inputmode="decimal"></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="portal-proof-total"><span><strong id="proof-count">0</strong> título(s) selecionado(s)</span><span>Total da solicitação</span><strong id="proof-total">R$ 0,00</strong></div>
+    <div class="form-actions"><a class="button button-light" href="{{ url_for('portal.dashboard') }}">Cancelar</a><button class="button" type="submit">Enviar para análise</button></div>
+    {% else %}<div class="empty-state">Não há títulos disponíveis. Títulos que já possuem comprovante em análise ficam temporariamente bloqueados para novo envio.</div>{% endif %}
+</form>
+<script>
+(() => {
+    const form=document.getElementById('proof-form'), totalNode=document.getElementById('proof-total'), countNode=document.getElementById('proof-count'), selectAll=document.getElementById('proof-select-all');
+    if(!form||!totalNode||!countNode)return;
+    const parseBR=value=>{let text=String(value||'').replace(/\s/g,'').replace('R$','');if(text.includes(','))text=text.replace(/\./g,'').replace(',','.');const number=Number(text);return Number.isFinite(number)?number:0;};
+    const update=()=>{let total=0,count=0;form.querySelectorAll('.proof-check').forEach(check=>{if(!check.checked)return;count+=1;total+=parseBR(check.closest('tr').querySelector('.proof-value').value);});countNode.textContent=String(count);totalNode.textContent=total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});if(selectAll){const checks=[...form.querySelectorAll('.proof-check')];selectAll.textContent=checks.length&&checks.every(c=>c.checked)?'Desmarcar todos':'Selecionar todos';}};
+    selectAll?.addEventListener('click',()=>{const checks=[...form.querySelectorAll('.proof-check')];const mark=!checks.every(check=>check.checked);checks.forEach(check=>{check.checked=mark;});update();});
+    form.addEventListener('input',update);form.addEventListener('change',update);update();
+})();
+</script>
+{% endblock %}

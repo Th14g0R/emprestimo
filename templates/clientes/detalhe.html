@@ -54,6 +54,34 @@
     </section>
 </div>
 
+<section class="card section-card client-portal-access-card">
+    <div class="section-title-row">
+        <div>
+            <h2>Acesso do cliente ao portal</h2>
+            <p class="muted section-subtitle">Indica se este cliente pode consultar os próprios dados.</p>
+        </div>
+        {% if acesso_portal %}
+            <a class="button button-secondary button-small" href="{{ url_for('portal.edit_access', aid=acesso_portal['id']) }}">Gerenciar acesso</a>
+        {% else %}
+            <a class="button button-light button-small" href="{{ url_for('portal.admin_accesses') }}">Ver acessos</a>
+        {% endif %}
+    </div>
+
+    {% if acesso_portal %}
+    <div class="portal-access-summary">
+        <div>
+            <span>Status</span>
+            <strong class="badge badge-{{ 'ativo' if acesso_portal['status'] == 'ATIVO' else ('vencido' if acesso_portal['status'] in ['REJEITADO','BLOQUEADO'] else 'pendente') }}">{{ acesso_portal['status']|acesso_status }}</strong>
+        </div>
+        <div><span>E-mail de acesso</span><strong>{{ acesso_portal['email'] }}</strong></div>
+        <div><span>Último login</span><strong>{{ acesso_portal['ultimo_login_at']|date_br if acesso_portal['ultimo_login_at'] else 'Nunca acessou' }}</strong></div>
+        <div><span>Contato conferido</span><strong>{{ 'Sim' if acesso_portal['contato_validado'] else 'Revisar' }}</strong></div>
+    </div>
+    {% else %}
+        <div class="empty-state portal-access-empty">Este cliente ainda não possui cadastro de acesso ao portal.</div>
+    {% endif %}
+</section>
+
 <div class="detail-grid">
     <section class="card section-card">
         <h2>Dados cadastrais</h2>

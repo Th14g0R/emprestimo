@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Portal - Editar acesso{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Editar acesso do cliente</h1><p class="muted">{{ acesso['cliente_nome'] }} · acesso #{{ acesso['id'] }}</p></div><a class="button button-light" href="{{ url_for('portal.admin_accesses') }}">Voltar</a></div>
+<div class="financial-operation-grid portal-access-edit-grid">
+<section class="card section-card">
+    <h2>Cadastro de acesso</h2>
+    <form method="post" class="form-grid form-grid-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>E-mail de login<input type="email" name="email" value="{{ form['email'] }}" required></label>
+        <label>Telefone informado<input name="telefone" value="{{ form['telefone'] }}" inputmode="tel"></label>
+        <label>Situação do acesso<select name="status" required><option value="ATIVO" {{ 'selected' if form['status']=='ATIVO' }}>Ativo</option><option value="PENDENTE" {{ 'selected' if form['status']=='PENDENTE' }}>Pendente de aprovação</option><option value="BLOQUEADO" {{ 'selected' if form['status']=='BLOQUEADO' }}>Inativo</option></select><small class="field-help">Inativo impede novos logins.</small></label>
+        <label>Observação administrativa<input name="observacao_admin" value="{{ form['observacao_admin'] }}" maxlength="500"></label>
+        <label>Nova senha<input type="password" name="nova_senha" minlength="10" autocomplete="new-password"><small class="field-help">Deixe em branco para manter a senha atual.</small></label>
+        <label>Confirmar nova senha<input type="password" name="confirmar_nova_senha" minlength="10" autocomplete="new-password"></label>
+        <label class="field-span-2">Confirme sua senha de administrador<input type="password" name="senha_confirmacao" required autocomplete="current-password"></label>
+        <div class="form-actions field-span-2"><a class="button button-light" href="{{ url_for('portal.admin_accesses') }}">Cancelar</a><button class="button" type="submit">Salvar acesso</button></div>
+    </form>
+</section>
+<section class="card section-card">
+    <h2>Referência do cadastro</h2>
+    <dl class="details">
+        <dt>Cliente</dt><dd>{{ acesso['cliente_nome'] }}</dd>
+        <dt>E-mail cadastrado</dt><dd>{{ acesso['email_cadastrado'] or '-' }}</dd>
+        <dt>Telefone cadastrado</dt><dd>{{ acesso['telefone_cadastrado'] or '-' }}</dd>
+        <dt>Status atual</dt><dd>{{ acesso['status']|acesso_status }}</dd>
+        <dt>Solicitado</dt><dd>{{ acesso['solicitado_at']|date_br }}</dd>
+        <dt>Aprovado</dt><dd>{{ acesso['aprovado_at']|date_br if acesso['aprovado_at'] else '-' }}</dd>
+        <dt>Último login</dt><dd>{{ acesso['ultimo_login_at']|date_br if acesso['ultimo_login_at'] else '-' }}</dd>
+        <dt>Contato confere</dt><dd>{{ 'Sim' if acesso['contato_validado'] else 'Não / revisar' }}</dd>
+    </dl>
+</section>
+</div>
+{% endblock %}

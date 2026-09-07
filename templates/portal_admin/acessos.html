@@ -1,1 +1,58 @@
-{% extends "base.html" %}{% block title %}Portal - Acessos{% endblock %}{% block content %}<div class="page-header"><div><h1>Acessos de clientes</h1><p class="muted">A aprovação exige sua senha.</p></div><a class="button button-secondary" href="{{ url_for('portal.admin_proofs') }}">Comprovantes</a></div><section class="card section-card"><div class="table-responsive"><table data-sortable="true"><thead><tr><th>Cliente</th><th>E-mail</th><th>Contato confere</th><th>Status</th><th>Solicitado</th><th>Ações</th></tr></thead><tbody>{% for a in acessos %}<tr><td><a href="{{ url_for('clientes_detalhe',cliente_id=a['cliente_id']) }}">{{ a['cliente_nome'] }}</a></td><td>{{ a['email'] }}</td><td>{{ 'Sim' if a['contato_validado'] else 'Revisar manualmente' }}</td><td>{{ a['status'] }}</td><td>{{ a['solicitado_at']|date_br }}</td><td>{% if a['status']=='PENDENTE' %}<details><summary>Analisar</summary><p class="table-subtext">Cadastro: {{ a['email_cadastrado'] or '-' }} / {{ a['telefone_cadastrado'] or '-' }}<br>Solicitação: {{ a['email'] }} / {{ a['telefone_informado'] or '-' }}</p><form method="post" action="{{ url_for('portal.approve_access',aid=a['id']) }}" class="mini-review-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="observacao_admin" placeholder="Observação"><input type="password" name="senha_confirmacao" placeholder="Sua senha" required><button class="button button-small">Aprovar</button></form><form method="post" action="{{ url_for('portal.reject_access',aid=a['id']) }}" class="mini-review-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="observacao_admin" placeholder="Motivo" required><input type="password" name="senha_confirmacao" placeholder="Sua senha" required><button class="button button-danger button-small">Rejeitar</button></form></details>{% else %}{{ a['observacao_admin'] or '-' }}{% endif %}</td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends "base.html" %}
+{% block title %}Portal - Acessos de clientes{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Acessos de clientes</h1>
+        <p class="muted">Aprove solicitações e gerencie logins já existentes.</p>
+    </div>
+    <a class="button button-secondary" href="{{ url_for('portal.admin_proofs') }}">Comprovantes</a>
+</div>
+<section class="card section-card">
+{% if acessos %}
+<div class="table-responsive">
+<table data-sortable="true">
+    <thead><tr><th>Cliente</th><th>E-mail de acesso</th><th>Contato confere</th><th>Status</th><th>Solicitado</th><th>Último login</th><th data-no-sort="true">Ações</th></tr></thead>
+    <tbody>
+    {% for a in acessos %}
+        <tr>
+            <td><a href="{{ url_for('clientes_detalhe',cliente_id=a['cliente_id']) }}">{{ a['cliente_nome'] }}</a></td>
+            <td>{{ a['email'] }}</td>
+            <td><span class="badge badge-{{ 'ativo' if a['contato_validado'] else 'pendente' }}">{{ 'Sim' if a['contato_validado'] else 'Revisar' }}</span></td>
+            <td><span class="badge badge-{{ 'ativo' if a['status']=='ATIVO' else ('pendente' if a['status']=='PENDENTE' else 'vencido') }}">{{ a['status']|acesso_status }}</span></td>
+            <td>{{ a['solicitado_at']|date_br }}</td>
+            <td>{{ a['ultimo_login_at']|date_br if a['ultimo_login_at'] else '-' }}</td>
+            <td>
+                <div class="actions wrap-actions">
+                    <a class="button button-light button-small" href="{{ url_for('portal.edit_access', aid=a['id']) }}">Editar</a>
+                    {% if a['status']=='PENDENTE' %}
+                    <details class="admin-inline-review">
+                        <summary class="button button-secondary button-small">Analisar</summary>
+                        <div class="review-grid">
+                            <div><small>Cadastro atual</small><p>E-mail: {{ a['email_cadastrado'] or '-' }}<br>Telefone: {{ a['telefone_cadastrado'] or '-' }}</p></div>
+                            <div><small>Solicitação</small><p>E-mail: {{ a['email'] }}<br>Telefone: {{ a['telefone_informado'] or '-' }}</p></div>
+                        </div>
+                        <form method="post" action="{{ url_for('portal.approve_access',aid=a['id']) }}" class="mini-review-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input name="observacao_admin" placeholder="Observação opcional">
+                            <input type="password" name="senha_confirmacao" placeholder="Sua senha" required autocomplete="current-password">
+                            <button class="button button-small" type="submit">Aprovar</button>
+                        </form>
+                        <form method="post" action="{{ url_for('portal.reject_access',aid=a['id']) }}" class="mini-review-form">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input name="observacao_admin" placeholder="Motivo" required minlength="5">
+                            <input type="password" name="senha_confirmacao" placeholder="Sua senha" required autocomplete="current-password">
+                            <button class="button button-danger button-small" type="submit">Rejeitar</button>
+                        </form>
+                    </details>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+{% else %}<div class="empty-state">Nenhum acesso de cliente cadastrado.</div>{% endif %}
+</section>
+{% endblock %}

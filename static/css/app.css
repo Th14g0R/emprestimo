@@ -1926,3 +1926,20 @@ tbody tr:hover {
 
 /* V23 - portal */
 .nav-badge{display:inline-flex;min-width:18px;height:18px;align-items:center;justify-content:center;padding:0 5px;margin-left:3px;border-radius:999px;background:#dc2626;color:#fff;font-size:10px;font-weight:800}.admin-portal-alert{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.9rem 1rem;margin-bottom:1rem;border-left:4px solid #d97706}.admin-portal-alert>div:first-child{display:flex;flex-direction:column;gap:.15rem}.portal-body{background:#f3f6fa}.portal-page{max-width:1320px}.auth-shell{min-height:70vh;display:grid;place-items:center}.auth-card{width:min(440px,100%);padding:1.4rem}.auth-card-wide{width:min(760px,100%)}.auth-links,.auth-alternative{display:flex;gap:.8rem;margin-top:1rem;font-size:.85rem}.privacy-box{padding:.85rem 1rem;border:1px solid #cbd5e1;border-radius:.7rem;background:#f8fafc}.privacy-box p{margin:.25rem 0 0;color:var(--muted)}.portal-proof-total{display:flex;justify-content:flex-end;gap:.8rem;padding:.9rem 0}.portal-proof-total strong{font-size:1.2rem}.mini-review-form{display:grid;grid-template-columns:minmax(140px,1fr) minmax(120px,.7fr) auto;gap:.4rem;margin-top:.5rem}.card-due-day-note{margin:-.3rem 0 .9rem;color:var(--muted)}@media(max-width:760px){.admin-portal-alert{align-items:flex-start;flex-direction:column}.mini-review-form{grid-template-columns:1fr}}
+
+
+/* V24 - gestão de acessos e comprovantes compactos */
+.client-portal-access-card{margin-bottom:1rem;}
+.portal-access-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem;}
+.portal-access-summary>div{display:flex;flex-direction:column;gap:.25rem;padding:.75rem .85rem;border:1px solid var(--border);border-radius:.7rem;background:#f8fafc;min-width:0;}
+.portal-access-summary span{color:var(--muted);font-size:.76rem;}
+.portal-access-summary strong:not(.badge){overflow-wrap:anywhere;}
+.readonly-portal-notice{display:flex;align-items:flex-start;gap:.55rem;margin-bottom:1rem;padding:.75rem .9rem;border:1px solid #bfdbfe;border-left:4px solid #2563eb;border-radius:.65rem;background:#eff6ff;color:#1e3a8a;}
+.readonly-portal-notice strong{white-space:nowrap;}
+.proof-consolidated-notice{margin-top:-.2rem;}
+.portal-proof-title-row{margin-top:1rem;}
+.portal-access-edit-grid{align-items:start;}
+.admin-inline-review>summary.button{display:inline-flex;list-style:none;}
+.admin-inline-review>summary.button::-webkit-details-marker{display:none;}
+@media(max-width:900px){.portal-access-summary{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:560px){.portal-access-summary{grid-template-columns:1fr;}.readonly-portal-notice{flex-direction:column;}}

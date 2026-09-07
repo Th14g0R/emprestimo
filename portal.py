@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 import re
 import secrets
 import sqlite3
@@ -12,6 +13,7 @@ from uuid import uuid4
 
 from flask import Blueprint, abort, current_app, flash, g, redirect, render_template, request, send_file, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app import (
     DATA_DIR, aplicar_recebimento_titulo,
@@ -25,7 +27,10 @@ from app import (
 
 bp = Blueprint("portal", __name__)
 PROOFS_DIR = (DATA_DIR / "comprovantes").resolve()
-MAX_PROOF_BYTES = 5 * 1024 * 1024
+MAX_PROOF_INPUT_BYTES = 6 * 1024 * 1024
+MAX_PROOF_STORED_BYTES = 3 * 1024 * 1024
+MAX_IMAGE_DIMENSION = 1800
+MAX_IMAGE_PIXELS = 20_000_000
 
 
 def init_schema() -> None:
@@ -94,6 +99,15 @@ def proof_status(value: str | None) -> str:
     return {"EM_ANALISE":"Pg. em análise","CONFIRMADO":"Confirmado","REJEITADO":"Rejeitado"}.get(str(value or '').upper(), value or '-')
 
 
+def access_status(value: str | None) -> str:
+    return {
+        "PENDENTE": "Pendente",
+        "ATIVO": "Ativo",
+        "REJEITADO": "Rejeitado",
+        "BLOQUEADO": "Inativo",
+    }.get(str(value or "").upper(), value or "-")
+
+
 def portal_required(view):
     from functools import wraps
     @wraps(view)
@@ -120,20 +134,107 @@ def contact_matches(c, email, phone):
     return bool((c['email'] and str(c['email']).strip().lower()==email.lower()) or (c['telefone'] and only_digits(c['telefone'])==only_digits(phone)))
 
 
+def _image_to_compact_jpeg(data: bytes) -> bytes:
+    try:
+        with Image.open(BytesIO(data), formats=("JPEG", "PNG")) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0:
+                raise ValueError("A imagem enviada é inválida.")
+            if width * height > MAX_IMAGE_PIXELS:
+                raise ValueError(
+                    "A imagem possui resolução excessiva. Envie uma imagem "
+                    "com até aproximadamente 20 megapixels."
+                )
+
+            image.load()
+            image = ImageOps.exif_transpose(image)
+            image.thumbnail(
+                (MAX_IMAGE_DIMENSION, MAX_IMAGE_DIMENSION),
+                Image.Resampling.LANCZOS,
+            )
+
+            if image.mode in {"RGBA", "LA"}:
+                rgba = image.convert("RGBA")
+                background = Image.new("RGB", rgba.size, "white")
+                background.paste(rgba, mask=rgba.getchannel("A"))
+                image = background
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+
+            for quality in (82, 74, 66):
+                buffer = BytesIO()
+                image.save(
+                    buffer,
+                    format="JPEG",
+                    quality=quality,
+                    optimize=True,
+                    progressive=True,
+                )
+                optimized = buffer.getvalue()
+                if len(optimized) <= MAX_PROOF_STORED_BYTES:
+                    return optimized
+
+            image.thumbnail((1400, 1400), Image.Resampling.LANCZOS)
+            buffer = BytesIO()
+            image.save(
+                buffer,
+                format="JPEG",
+                quality=66,
+                optimize=True,
+                progressive=True,
+            )
+            optimized = buffer.getvalue()
+            if len(optimized) > MAX_PROOF_STORED_BYTES:
+                raise ValueError(
+                    "Mesmo após otimização, a imagem ficou maior que 3 MB. "
+                    "Reduza a resolução e tente novamente."
+                )
+            return optimized
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("A imagem enviada não pôde ser validada.") from exc
+
+
 def validate_file(storage):
-    original=Path(storage.filename or '').name.strip()[:180]
-    suffix=Path(original).suffix.lower()
-    if suffix not in {'.pdf','.png','.jpg','.jpeg'}: raise ValueError('Envie PDF, PNG, JPG ou JPEG.')
-    data=storage.read(MAX_PROOF_BYTES+1)
-    if not data: raise ValueError('O comprovante está vazio.')
-    if len(data)>MAX_PROOF_BYTES: raise ValueError('O comprovante deve ter no máximo 5 MB.')
-    if data.startswith(b'%PDF-'): ext,mime='.pdf','application/pdf'
-    elif data.startswith(b'\x89PNG\r\n\x1a\n'): ext,mime='.png','image/png'
-    elif data[:3]==b'\xff\xd8\xff': ext,mime='.jpg','image/jpeg'
-    else: raise ValueError('O conteúdo do arquivo não é PDF, PNG ou JPEG válido.')
-    group='.jpg' if suffix in {'.jpg','.jpeg'} else suffix
-    if group!=ext: raise ValueError('A extensão não corresponde ao conteúdo do arquivo.')
-    return data,ext,mime,original
+    original = Path(storage.filename or '').name.strip()[:180]
+    if not original:
+        raise ValueError('Selecione o comprovante.')
+
+    suffix = Path(original).suffix.lower()
+    if suffix not in {'.pdf', '.png', '.jpg', '.jpeg'}:
+        raise ValueError(
+            'Formato não permitido. Envie somente PDF, PNG, JPG ou JPEG.'
+        )
+
+    data = storage.read(MAX_PROOF_INPUT_BYTES + 1)
+    if not data:
+        raise ValueError('O comprovante está vazio.')
+    if len(data) > MAX_PROOF_INPUT_BYTES:
+        raise ValueError(
+            'O arquivo enviado deve ter no máximo 6 MB antes da otimização.'
+        )
+
+    if data.startswith(b'%PDF-'):
+        if suffix != '.pdf':
+            raise ValueError('A extensão não corresponde ao conteúdo do arquivo.')
+        if len(data) > MAX_PROOF_STORED_BYTES:
+            raise ValueError('Comprovantes PDF devem ter no máximo 3 MB.')
+        return data, '.pdf', 'application/pdf', original
+
+    is_png = data.startswith(b'\x89PNG\r\n\x1a\n')
+    is_jpeg = data[:3] == b'\xff\xd8\xff'
+    if not (is_png or is_jpeg):
+        raise ValueError(
+            'O conteúdo do arquivo não é uma imagem PNG/JPEG nem um PDF válido.'
+        )
+
+    expected_group = '.png' if is_png else '.jpg'
+    suffix_group = '.jpg' if suffix in {'.jpg', '.jpeg'} else suffix
+    if suffix_group != expected_group:
+        raise ValueError('A extensão não corresponde ao conteúdo do arquivo.')
+
+    optimized = _image_to_compact_jpeg(data)
+    optimized_name = f"{Path(original).stem[:160] or 'comprovante'}.jpg"
+    return optimized, '.jpg', 'image/jpeg', optimized_name
 
 
 def card_summaries(client_id):
@@ -189,32 +290,168 @@ def portal_context():
 def filter_proof_status(v): return proof_status(v)
 
 
+@bp.app_template_filter('acesso_status')
+def filter_access_status(v): return access_status(v)
+
+
 @bp.route('/portal/cadastro',methods=['GET','POST'])
 def register():
-    form={'cpf':request.form.get('cpf',''),'email':request.form.get('email',''),'telefone':request.form.get('telefone','')}
-    if request.method=='POST':
-        cpf=only_digits(form['cpf']); email=form['email'].strip().lower(); phone=only_digits(form['telefone']); password=request.form.get('senha',''); confirm=request.form.get('confirmar_senha',''); errors=[]
-        if not validate_cpf(cpf): errors.append('Informe um CPF válido.')
-        if not valid_email(email): errors.append('Informe um e-mail válido.')
-        if len(password)<10: errors.append('A senha deve ter pelo menos 10 caracteres.')
-        if password!=confirm: errors.append('A confirmação da senha não confere.')
-        if errors:
-            for e in errors: flash(e,'danger')
-        else:
-            db=get_db(); c=find_client_by_cpf(cpf); generic='Solicitação recebida. Se os dados puderem ser vinculados ao cadastro existente, o acesso ficará aguardando aprovação do administrador.'
-            if c is not None and c['ativo']:
-                matched=int(contact_matches(c,email,phone)); existing=db.execute("SELECT id,status FROM clientes_acessos WHERE cliente_id=? OR lower(email)=lower(?) LIMIT 1",(c['id'],email)).fetchone()
-                try:
-                    if existing is None:
-                        cur=db.execute("INSERT INTO clientes_acessos(cliente_id,email,telefone_informado,senha_hash,status,contato_validado) VALUES(?,?,?,?,'PENDENTE',?)",(c['id'],email,phone or None,generate_password_hash(password),matched)); aid=cur.lastrowid
-                    elif existing['status']=='REJEITADO':
-                        db.execute("UPDATE clientes_acessos SET email=?,telefone_informado=?,senha_hash=?,status='PENDENTE',contato_validado=?,tentativas_falhas=0,bloqueado_ate=NULL,observacao_admin=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?",(email,phone or None,generate_password_hash(password),matched,existing['id'])); aid=existing['id']
-                    else: aid=existing['id']
-                    registrar_auditoria(db,'cliente_acesso',int(aid),'SOLICITADO',json.dumps({'cliente_id':int(c['id']),'contato_validado':bool(matched)},ensure_ascii=False)); db.commit()
-                except sqlite3.IntegrityError: db.rollback()
-            flash(generic,'success'); return redirect(url_for('portal.login'))
-    return render_template('portal/cadastro.html',form=form)
+    form = {
+        'cpf': request.form.get('cpf', ''),
+        'email': request.form.get('email', ''),
+        'telefone': request.form.get('telefone', ''),
+    }
 
+    if request.method == 'POST':
+        cpf = only_digits(form['cpf'])
+        email = form['email'].strip().lower()
+        phone = only_digits(form['telefone'])
+        password = request.form.get('senha', '')
+        confirm = request.form.get('confirmar_senha', '')
+        errors = []
+
+        if not validate_cpf(cpf):
+            errors.append('Informe um CPF válido.')
+        if not valid_email(email):
+            errors.append('Informe um e-mail válido.')
+        if len(password) < 10:
+            errors.append('A senha deve ter pelo menos 10 caracteres.')
+        if password != confirm:
+            errors.append('A confirmação da senha não confere.')
+
+        if errors:
+            for error in errors:
+                flash(error, 'danger')
+            return render_template('portal/cadastro.html', form=form)
+
+        db = get_db()
+        client = find_client_by_cpf(cpf)
+
+        if client is None or not client['ativo']:
+            flash(
+                'Não foi possível realizar a solicitação porque não há um '
+                'cliente ativo com este CPF cadastrado. Confira o CPF ou '
+                'entre em contato com o responsável pelo cadastro.',
+                'warning',
+            )
+            return render_template('portal/cadastro.html', form=form), 400
+
+        existing_client = db.execute(
+            'SELECT id,status,email FROM clientes_acessos WHERE cliente_id=? LIMIT 1',
+            (client['id'],),
+        ).fetchone()
+        existing_email = db.execute(
+            'SELECT id,cliente_id,status FROM clientes_acessos WHERE lower(email)=lower(?) LIMIT 1',
+            (email,),
+        ).fetchone()
+
+        if (
+            existing_email is not None
+            and int(existing_email['cliente_id']) != int(client['id'])
+        ):
+            flash(
+                'Este e-mail já está associado a outro acesso. Use outro '
+                'e-mail ou procure o administrador.',
+                'warning',
+            )
+            return render_template('portal/cadastro.html', form=form), 409
+
+        matched = int(contact_matches(client, email, phone))
+
+        try:
+            if existing_client is None:
+                cur = db.execute(
+                    """
+                    INSERT INTO clientes_acessos(
+                        cliente_id,email,telefone_informado,senha_hash,
+                        status,contato_validado
+                    ) VALUES(?,?,?,?,'PENDENTE',?)
+                    """,
+                    (
+                        client['id'],
+                        email,
+                        phone or None,
+                        generate_password_hash(password),
+                        matched,
+                    ),
+                )
+                access_id = int(cur.lastrowid)
+                message = (
+                    'Solicitação enviada. O acesso ficará pendente até a '
+                    'aprovação do administrador.'
+                )
+            elif existing_client['status'] in {'PENDENTE', 'REJEITADO'}:
+                access_id = int(existing_client['id'])
+                db.execute(
+                    """
+                    UPDATE clientes_acessos
+                       SET email=?, telefone_informado=?, senha_hash=?,
+                           status='PENDENTE', contato_validado=?,
+                           tentativas_falhas=0, bloqueado_ate=NULL,
+                           observacao_admin=NULL,
+                           solicitado_at=CURRENT_TIMESTAMP,
+                           updated_at=CURRENT_TIMESTAMP
+                     WHERE id=?
+                    """,
+                    (
+                        email,
+                        phone or None,
+                        generate_password_hash(password),
+                        matched,
+                        access_id,
+                    ),
+                )
+                message = (
+                    'Solicitação atualizada. O acesso ficará pendente até a '
+                    'aprovação do administrador.'
+                )
+            elif existing_client['status'] == 'ATIVO':
+                db.rollback()
+                flash(
+                    'Este cliente já possui acesso ativo. Use a tela de login '
+                    'ou procure o administrador para redefinir a senha.',
+                    'info',
+                )
+                return redirect(url_for('portal.login'))
+            else:
+                db.rollback()
+                flash(
+                    'Este cliente possui um acesso inativo. Procure o '
+                    'administrador para reativação.',
+                    'warning',
+                )
+                return redirect(url_for('portal.login'))
+
+            registrar_auditoria(
+                db,
+                'cliente_acesso',
+                access_id,
+                'SOLICITADO',
+                json.dumps(
+                    {
+                        'cliente_id': int(client['id']),
+                        'contato_validado': bool(matched),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            db.rollback()
+            current_app.logger.exception(
+                'Conflito ao registrar solicitação de acesso do cliente'
+            )
+            flash(
+                'Não foi possível registrar a solicitação com estes dados. '
+                'Verifique o e-mail ou procure o administrador.',
+                'danger',
+            )
+            return render_template('portal/cadastro.html', form=form), 409
+
+        flash(message, 'success')
+        return redirect(url_for('portal.login'))
+
+    return render_template('portal/cadastro.html', form=form)
 
 @bp.route('/portal/login',methods=['GET','POST'])
 def login():
@@ -320,12 +557,197 @@ def client_file(proof_id):
 @bp.get('/acessos-clientes')
 def admin_accesses():
     if getattr(g,'usuario',None) is None: return redirect(url_for('login'))
-    rows=get_db().execute("""SELECT ca.id,ca.email,ca.telefone_informado,ca.status,ca.contato_validado,ca.solicitado_at,ca.observacao_admin,c.id cliente_id,c.nome cliente_nome,c.email email_cadastrado,c.telefone telefone_cadastrado FROM clientes_acessos ca JOIN clientes c ON c.id=ca.cliente_id ORDER BY CASE ca.status WHEN 'PENDENTE' THEN 0 WHEN 'ATIVO' THEN 1 ELSE 2 END,ca.solicitado_at DESC""").fetchall(); return render_template('portal_admin/acessos.html',acessos=rows)
+    rows=get_db().execute("""
+        SELECT ca.id,ca.email,ca.telefone_informado,ca.status,
+               ca.contato_validado,ca.solicitado_at,ca.aprovado_at,
+               ca.ultimo_login_at,ca.observacao_admin,
+               c.id cliente_id,c.nome cliente_nome,
+               c.email email_cadastrado,c.telefone telefone_cadastrado
+          FROM clientes_acessos ca
+          JOIN clientes c ON c.id=ca.cliente_id
+         ORDER BY CASE ca.status
+                    WHEN 'PENDENTE' THEN 0
+                    WHEN 'ATIVO' THEN 1
+                    WHEN 'BLOQUEADO' THEN 2
+                    ELSE 3
+                  END,
+                  ca.solicitado_at DESC
+    """).fetchall()
+    return render_template('portal_admin/acessos.html',acessos=rows)
 
 
 def _admin_required():
     if getattr(g,'usuario',None) is None: return redirect(url_for('login'))
     return None
+
+
+@bp.route('/acessos-clientes/<int:aid>/editar',methods=['GET','POST'])
+def edit_access(aid):
+    r = _admin_required()
+    if r:
+        return r
+
+    db = get_db()
+    access = db.execute(
+        """
+        SELECT ca.*, c.nome AS cliente_nome, c.email AS email_cadastrado,
+               c.telefone AS telefone_cadastrado
+          FROM clientes_acessos ca
+          JOIN clientes c ON c.id=ca.cliente_id
+         WHERE ca.id=?
+        """,
+        (aid,),
+    ).fetchone()
+    if access is None:
+        abort(404)
+
+    form = {
+        'email': request.form.get('email', access['email']),
+        'telefone': request.form.get(
+            'telefone',
+            access['telefone_informado'] or '',
+        ),
+        'status': request.form.get('status', access['status']),
+        'observacao_admin': request.form.get(
+            'observacao_admin',
+            access['observacao_admin'] or '',
+        ),
+    }
+
+    if request.method == 'POST':
+        email = form['email'].strip().lower()
+        phone = only_digits(form['telefone'])
+        status = form['status'].strip().upper()
+        observation = form['observacao_admin'].strip()
+        new_password = request.form.get('nova_senha', '')
+        confirm_password = request.form.get('confirmar_nova_senha', '')
+        admin_password = request.form.get('senha_confirmacao', '')
+        errors = []
+
+        if not valid_email(email):
+            errors.append('Informe um e-mail válido.')
+        if status not in {'PENDENTE', 'ATIVO', 'BLOQUEADO'}:
+            errors.append('Status de acesso inválido.')
+        if new_password:
+            if len(new_password) < 10:
+                errors.append(
+                    'A nova senha deve ter pelo menos 10 caracteres.'
+                )
+            if new_password != confirm_password:
+                errors.append('A confirmação da nova senha não confere.')
+        if not validar_senha_usuario_atual(admin_password):
+            errors.append('Sua senha de confirmação é inválida.')
+
+        conflicting = db.execute(
+            """
+            SELECT id,cliente_id
+              FROM clientes_acessos
+             WHERE lower(email)=lower(?) AND id<>?
+             LIMIT 1
+            """,
+            (email, aid),
+        ).fetchone()
+        if conflicting is not None:
+            errors.append('Este e-mail já está associado a outro acesso.')
+
+        if errors:
+            for error in errors:
+                flash(error, 'danger')
+        else:
+            before = {
+                'email': access['email'],
+                'telefone_informado': access['telefone_informado'],
+                'status': access['status'],
+                'contato_validado': bool(access['contato_validado']),
+                'observacao_admin': access['observacao_admin'],
+            }
+            matched = int(
+                bool(
+                    access['email_cadastrado']
+                    and str(access['email_cadastrado']).strip().lower()
+                    == email
+                )
+                or bool(
+                    access['telefone_cadastrado']
+                    and only_digits(access['telefone_cadastrado']) == phone
+                )
+            )
+            password_hash = (
+                generate_password_hash(new_password)
+                if new_password
+                else access['senha_hash']
+            )
+
+            approved_at = access['aprovado_at']
+            approved_by = access['aprovado_por_usuario_id']
+            if status == 'ATIVO' and access['status'] != 'ATIVO':
+                approved_at = datetime.now().isoformat(
+                    sep=' ',
+                    timespec='seconds',
+                )
+                approved_by = g.usuario['id']
+
+            try:
+                db.execute(
+                    """
+                    UPDATE clientes_acessos
+                       SET email=?, telefone_informado=?, senha_hash=?,
+                           status=?, contato_validado=?,
+                           observacao_admin=?, aprovado_at=?,
+                           aprovado_por_usuario_id=?,
+                           tentativas_falhas=0, bloqueado_ate=NULL,
+                           updated_at=CURRENT_TIMESTAMP
+                     WHERE id=?
+                    """,
+                    (
+                        email,
+                        phone or None,
+                        password_hash,
+                        status,
+                        matched,
+                        observation or None,
+                        approved_at,
+                        approved_by,
+                        aid,
+                    ),
+                )
+                registrar_auditoria(
+                    db,
+                    'cliente_acesso',
+                    aid,
+                    'ALTERADO_ADMIN',
+                    json.dumps(
+                        {
+                            'antes': before,
+                            'depois': {
+                                'email': email,
+                                'telefone_informado': phone or None,
+                                'status': status,
+                                'contato_validado': bool(matched),
+                                'observacao_admin': observation or None,
+                            },
+                            'senha_alterada': bool(new_password),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+                db.commit()
+            except sqlite3.IntegrityError:
+                db.rollback()
+                flash(
+                    'Não foi possível salvar. Verifique se o e-mail já está '
+                    'associado a outro acesso.',
+                    'danger',
+                )
+            else:
+                flash('Cadastro de acesso atualizado.', 'success')
+                return redirect(url_for('portal.admin_accesses'))
+
+    return render_template(
+        'portal_admin/acesso_editar.html',
+        acesso=access,
+        form=form,
+    )
 
 
 @bp.post('/acessos-clientes/<int:aid>/aprovar')

@@ -27,7 +27,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "23.0-client-portal-proof-security"
+APP_VERSION = "24.0-portal-admin-upload-consolidated"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -88,7 +88,7 @@ def create_app() -> Flask:
         SESSION_COOKIE_SAMESITE="Lax",
         # Em hospedagem HTTPS configure EMPRESTIMO_HTTPS=1.
         SESSION_COOKIE_SECURE=env_bool("EMPRESTIMO_HTTPS", False),
-        MAX_CONTENT_LENGTH=6 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=7 * 1024 * 1024,
         MAX_FORM_MEMORY_SIZE=256 * 1024,
         MAX_FORM_PARTS=100,
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
@@ -2443,6 +2443,18 @@ def register_routes(app: Flask) -> None:
             (cliente_id,),
         ).fetchall()
 
+        acesso_portal = db.execute(
+            """
+            SELECT ca.id, ca.email, ca.telefone_informado, ca.status,
+                   ca.contato_validado, ca.solicitado_at, ca.aprovado_at,
+                   ca.ultimo_login_at, ca.observacao_admin
+              FROM clientes_acessos ca
+             WHERE ca.cliente_id = ?
+             LIMIT 1
+            """,
+            (cliente_id,),
+        ).fetchone()
+
         return render_template(
             "clientes/detalhe.html",
             cliente=cliente,
@@ -2450,6 +2462,7 @@ def register_routes(app: Flask) -> None:
             contas_bancarias=contas_bancarias,
             cartoes=cartoes,
             resumo_financeiro=resumo_financeiro,
+            acesso_portal=acesso_portal,
         )
 
     @app.route("/clientes/<int:cliente_id>/editar", methods=["GET", "POST"])
