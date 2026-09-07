@@ -35,6 +35,13 @@
             </small>
         </label>
 
+        <label>
+            Dia de vencimento
+            <input type="number" name="dia_vencimento" min="1" max="31" value="{{ form['dia_vencimento'] }}" required>
+            <small class="field-help">Não altera parcelas já geradas.</small>
+        </label>
+        <div></div>
+
         <label class="field-span-2">
             Motivo da alteração
             <textarea
@@ -63,7 +70,7 @@
                 Cancelar
             </a>
             <button class="button" type="submit">
-                Salvar nome do cartão
+                Salvar cartão
             </button>
         </div>
     </form>

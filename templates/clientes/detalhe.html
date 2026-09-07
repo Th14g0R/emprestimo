@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ cliente['nome'] }}{% endblock %}
+{% block title %}Cliente - {{ cliente['nome'] }}{% endblock %}
 
 {% block content %}
 <div class="page-header">
@@ -161,12 +161,17 @@
     {% if cartoes %}
     <div class="table-responsive">
         <table data-sortable="true">
-            <thead><tr><th>Descrição</th><th>Status</th></tr></thead>
+            <thead><tr><th>Cartão</th><th class="text-right">Total emprestado</th><th class="text-right">Parcelas</th><th class="text-right">Pagas</th><th>Dia venc.</th><th class="text-right">Em aberto</th><th>Status</th></tr></thead>
             <tbody>
             {% for cartao in cartoes %}
                 <tr>
                     <td><a href="{{ url_for('cartoes_detalhe', cartao_id=cartao['id']) }}">{{ cartao['descricao'] }}</a></td>
-                    <td>{{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</td>
+                    <td class="text-right">{{ cartao['total_emprestado_centavos']|money }}</td>
+                    <td class="text-right">{{ cartao['parcelas_totais'] }}</td>
+                    <td class="text-right">{{ cartao['parcelas_pagas'] }}</td>
+                    <td>{{ ('Dia ' ~ cartao['dia_vencimento']) if cartao['dia_vencimento'] else '-' }}</td>
+                    <td class="text-right"><strong>{{ cartao['valor_em_aberto_centavos']|money }}</strong></td>
+                    <td><span class="badge badge-{{ 'ativo' if cartao['ativo'] else 'inativo' }}">{{ 'Ativo' if cartao['ativo'] else 'Inativo' }}</span></td>
                 </tr>
             {% endfor %}
             </tbody>

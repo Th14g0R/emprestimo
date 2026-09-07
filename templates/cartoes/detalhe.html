@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ cartao['descricao'] }}{% endblock %}
+{% block title %}Cartão - {{ cartao['descricao'] }}{% endblock %}
 {% block content %}
 
 <div class="page-header">
@@ -34,6 +34,7 @@
     </div>
 </div>
 
+{% if cartao['dia_vencimento'] %}<p class="card-due-day-note">Vencimento padrão: <strong>dia {{ cartao['dia_vencimento'] }}</strong>.</p>{% endif %}
 <div class="loan-summary-grid">
     <div class="card metric-card">
         <span>Total parcelado</span>

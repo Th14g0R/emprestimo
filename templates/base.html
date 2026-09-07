@@ -3,14 +3,14 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}Empréstimos{% endblock %}</title>
+    <title>Empréstimo | {% block title %}Sistema{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body>
     {% if g.usuario %}
     <header class="topbar">
         <div class="container topbar-content">
-            <a class="brand" href="{{ url_for('dashboard') }}">Empréstimos</a>
+            <a class="brand" href="{{ url_for('dashboard') }}">Empréstimo</a>
 
             <nav class="nav" aria-label="Menu principal">
                 <a class="{{ 'active' if request.endpoint == 'dashboard' else '' }}"
@@ -41,6 +41,11 @@
 
                 <a class="{{ 'active' if request.endpoint and (request.endpoint.startswith('cartoes_') or request.endpoint.startswith('parcelas_cartao_')) else '' }}"
                    href="{{ url_for('cartoes_lista') }}">Cartões</a>
+
+                <a class="{{ 'active' if request.endpoint and request.endpoint.startswith('portal.') and request.endpoint not in ['portal.login','portal.register','portal.dashboard','portal.proofs','portal.new_proof','portal.client_file'] else '' }}"
+                   href="{{ url_for('portal.admin_proofs') }}">
+                    Portal{% if portal_alerts['total'] %}<span class="nav-badge">{{ portal_alerts['total'] }}</span>{% endif %}
+                </a>
             </nav>
 
             <div class="user-menu">

@@ -27,7 +27,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "22.0-receivables-client-whatsapp"
+APP_VERSION = "23.0-client-portal-proof-security"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -88,7 +88,10 @@ def create_app() -> Flask:
         SESSION_COOKIE_SAMESITE="Lax",
         # Em hospedagem HTTPS configure EMPRESTIMO_HTTPS=1.
         SESSION_COOKIE_SECURE=env_bool("EMPRESTIMO_HTTPS", False),
-        MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+        MAX_CONTENT_LENGTH=6 * 1024 * 1024,
+        MAX_FORM_MEMORY_SIZE=256 * 1024,
+        MAX_FORM_PARTS=100,
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     )
 
     trusted_hosts = env_list("EMPRESTIMO_TRUSTED_HOSTS")
@@ -116,6 +119,9 @@ def create_app() -> Flask:
     register_context_processors(app)
     register_template_filters(app)
     register_routes(app)
+
+    from portal import register_portal
+    register_portal(app)
 
     return app
 
@@ -615,6 +621,9 @@ def migrate_schema(db: sqlite3.Connection) -> None:
         "origem_item",
         "TEXT NOT NULL DEFAULT 'MANUAL'",
     )
+    add_column_if_missing(db, "usuarios", "tentativas_falhas", "INTEGER NOT NULL DEFAULT 0")
+    add_column_if_missing(db, "usuarios", "bloqueado_ate", "TEXT")
+    add_column_if_missing(db, "cartoes_credito", "dia_vencimento", "INTEGER")
     add_column_if_missing(db, "lancamentos_cartao", "usuario_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "conta_origem_id", "INTEGER")
     add_column_if_missing(db, "parcelas_cartao", "conta_destino_id", "INTEGER")
@@ -2028,24 +2037,80 @@ def register_routes(app: Flask) -> None:
             login_usuario = request.form.get("login", "").strip().lower()
             senha = request.form.get("senha", "")
 
-            usuario = get_db().execute(
+            db = get_db()
+            usuario = db.execute(
                 """
-                SELECT id, nome, login, senha_hash, ativo
+                SELECT id, nome, login, senha_hash, ativo,
+                       tentativas_falhas, bloqueado_ate
                   FROM usuarios
                  WHERE login = ?
                 """,
                 (login_usuario,),
             ).fetchone()
 
-            if usuario is None or not usuario["ativo"] or not check_password_hash(usuario["senha_hash"], senha):
-                flash("Login ou senha inválidos.", "danger")
+            agora = datetime.now()
+            bloqueado = False
+            if usuario is not None and usuario["bloqueado_ate"]:
+                try:
+                    bloqueado = datetime.fromisoformat(
+                        usuario["bloqueado_ate"]
+                    ) > agora
+                except ValueError:
+                    bloqueado = False
+
+            senha_correta = bool(
+                usuario is not None
+                and usuario["ativo"]
+                and not bloqueado
+                and check_password_hash(usuario["senha_hash"], senha)
+            )
+
+            if not senha_correta:
+                if usuario is not None and not bloqueado:
+                    falhas = int(usuario["tentativas_falhas"] or 0) + 1
+                    bloqueado_ate = None
+                    if falhas >= 5:
+                        bloqueado_ate = (
+                            agora + timedelta(minutes=15)
+                        ).isoformat(timespec="seconds")
+                        falhas = 0
+                    db.execute(
+                        """
+                        UPDATE usuarios
+                           SET tentativas_falhas = ?,
+                               bloqueado_ate = ?,
+                               updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?
+                        """,
+                        (falhas, bloqueado_ate, usuario["id"]),
+                    )
+                    db.commit()
+
+                flash(
+                    "Login ou senha inválidos. Se houver bloqueio temporário, "
+                    "aguarde alguns minutos e tente novamente.",
+                    "danger",
+                )
                 return render_template("login.html", login=login_usuario), 401
+
+            db.execute(
+                """
+                UPDATE usuarios
+                   SET tentativas_falhas = 0,
+                       bloqueado_ate = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                 WHERE id = ?
+                """,
+                (usuario["id"],),
+            )
+            db.commit()
 
             csrf_token = session.get("csrf_token")
             session.clear()
             if csrf_token:
                 session["csrf_token"] = csrf_token
             session["usuario_id"] = usuario["id"]
+            session.permanent = True
 
             return redirect(url_for("dashboard"))
 
@@ -2359,8 +2424,22 @@ def register_routes(app: Flask) -> None:
         ).fetchall()
         resumo_financeiro = resumo_financeiro_cliente(db, cliente_id)
         contas_bancarias = get_client_accounts(cliente_id, only_active=False)
+        refresh_overdue_card_installments(db)
         cartoes = db.execute(
-            "SELECT id, descricao, ativo FROM cartoes_credito WHERE cliente_id = ? ORDER BY ativo DESC, id DESC",
+            """
+            SELECT cc.id, cc.descricao, cc.ativo,
+                   COALESCE(cc.dia_vencimento, CAST(strftime('%d', MIN(pc.vencimento)) AS INTEGER)) AS dia_vencimento,
+                   COALESCE(SUM(pc.valor_centavos), 0) AS total_emprestado_centavos,
+                   COUNT(pc.id) AS parcelas_totais,
+                   COALESCE(SUM(CASE WHEN pc.status = 'PAGO' THEN 1 ELSE 0 END), 0) AS parcelas_pagas,
+                   COALESCE(SUM(CASE WHEN pc.status IN ('PENDENTE','VENCIDO') THEN pc.valor_centavos ELSE 0 END), 0) AS valor_em_aberto_centavos
+              FROM cartoes_credito cc
+              LEFT JOIN lancamentos_cartao lc ON lc.cartao_credito_id = cc.id
+              LEFT JOIN parcelas_cartao pc ON pc.lancamento_cartao_id = lc.id
+             WHERE cc.cliente_id = ?
+             GROUP BY cc.id
+             ORDER BY cc.ativo DESC, cc.id DESC
+            """,
             (cliente_id,),
         ).fetchall()
 
@@ -5594,16 +5673,20 @@ def register_routes(app: Flask) -> None:
         form = {
             "cliente_id": request.form.get("cliente_id", request.args.get("cliente_id", "")),
             "descricao": request.form.get("descricao", ""),
+            "dia_vencimento": request.form.get("dia_vencimento", ""),
         }
         if request.method == "POST":
             cliente_id = parse_int(form["cliente_id"])
             descricao = form["descricao"].strip()
+            dia_vencimento = parse_int(form["dia_vencimento"])
             errors: list[str] = []
             cliente = db.execute("SELECT id, ativo FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
             if cliente is None or not cliente["ativo"]:
                 errors.append("Selecione um cliente ativo.")
             if len(descricao) < 2:
-                errors.append("Informe uma descrição para o cartão.")
+                errors.append("Informe um nome para o cartão.")
+            if dia_vencimento is None or not 1 <= dia_vencimento <= 31:
+                errors.append("Informe o dia de vencimento do cartão entre 1 e 31.")
 
             if errors:
                 for error in errors:
@@ -5611,8 +5694,8 @@ def register_routes(app: Flask) -> None:
             else:
                 try:
                     cursor = db.execute(
-                        "INSERT INTO cartoes_credito (cliente_id, descricao, ativo) VALUES (?, ?, 1)",
-                        (cliente_id, descricao),
+                        "INSERT INTO cartoes_credito (cliente_id, descricao, dia_vencimento, ativo) VALUES (?, ?, ?, 1)",
+                        (cliente_id, descricao, dia_vencimento),
                     )
                     registrar_auditoria(db, "cartao_credito", int(cursor.lastrowid), "CRIADO", descricao)
                     db.commit()
@@ -5710,7 +5793,7 @@ def register_routes(app: Flask) -> None:
 
         cartao = db.execute(
             """
-            SELECT cc.id, cc.cliente_id, cc.descricao, cc.ativo,
+            SELECT cc.id, cc.cliente_id, cc.descricao, cc.dia_vencimento, cc.ativo,
                    cc.created_at, cc.updated_at,
                    c.nome AS cliente_nome
               FROM cartoes_credito cc
@@ -5728,6 +5811,10 @@ def register_routes(app: Flask) -> None:
                 "descricao",
                 cartao["descricao"],
             ),
+            "dia_vencimento": request.form.get(
+                "dia_vencimento",
+                cartao["dia_vencimento"] or "",
+            ),
             "motivo_alteracao": request.form.get(
                 "motivo_alteracao",
                 "",
@@ -5736,6 +5823,7 @@ def register_routes(app: Flask) -> None:
 
         if request.method == "POST":
             descricao = form["descricao"].strip()
+            dia_vencimento = parse_int(form["dia_vencimento"])
             motivo = form["motivo_alteracao"].strip()
             senha = request.form.get("senha_confirmacao", "")
             errors: list[str] = []
@@ -5749,6 +5837,8 @@ def register_routes(app: Flask) -> None:
                 errors.append(
                     "O nome do cartão deve ter no máximo 120 caracteres."
                 )
+            if dia_vencimento is None or not 1 <= dia_vencimento <= 31:
+                errors.append("Informe o dia de vencimento do cartão entre 1 e 31.")
 
             if len(motivo) < 5:
                 errors.append(
@@ -5769,12 +5859,14 @@ def register_routes(app: Flask) -> None:
                     "cliente_id": int(cartao["cliente_id"]),
                     "cliente_nome": cartao["cliente_nome"],
                     "descricao": cartao["descricao"],
+                    "dia_vencimento": cartao["dia_vencimento"],
                     "ativo": int(cartao["ativo"]),
                 }
 
                 after = {
                     **before,
                     "descricao": descricao,
+                    "dia_vencimento": dia_vencimento,
                 }
 
                 try:
@@ -5782,10 +5874,11 @@ def register_routes(app: Flask) -> None:
                         """
                         UPDATE cartoes_credito
                            SET descricao = ?,
+                               dia_vencimento = ?,
                                updated_at = CURRENT_TIMESTAMP
                          WHERE id = ?
                         """,
-                        (descricao, cartao_id),
+                        (descricao, dia_vencimento, cartao_id),
                     )
 
                     registrar_auditoria(
@@ -5866,12 +5959,32 @@ def register_routes(app: Flask) -> None:
             flash("Ative o cartão antes de criar novos lançamentos.", "warning")
             return redirect(url_for("cartoes_detalhe", cartao_id=cartao_id))
 
+        data_compra_padrao = date.today()
+        primeiro_vencimento_padrao = ""
+        if cartao["dia_vencimento"]:
+            proximo_mes = add_months_iso(
+                data_compra_padrao.replace(day=1),
+                1,
+            )
+            primeiro_vencimento_padrao = proximo_mes.replace(
+                day=min(
+                    int(cartao["dia_vencimento"]),
+                    monthrange(proximo_mes.year, proximo_mes.month)[1],
+                )
+            ).isoformat()
+
         form = {
             "descricao": request.form.get("descricao", ""),
             "valor_total": request.form.get("valor_total", ""),
             "quantidade_parcelas": request.form.get("quantidade_parcelas", "1"),
-            "data_compra": request.form.get("data_compra", date.today().isoformat()),
-            "primeiro_vencimento": request.form.get("primeiro_vencimento", ""),
+            "data_compra": request.form.get(
+                "data_compra",
+                data_compra_padrao.isoformat(),
+            ),
+            "primeiro_vencimento": request.form.get(
+                "primeiro_vencimento",
+                primeiro_vencimento_padrao,
+            ),
         }
         if request.method == "POST":
             descricao = form["descricao"].strip()

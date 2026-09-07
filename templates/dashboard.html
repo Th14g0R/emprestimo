@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
+{% if portal_alerts['total'] %}
+<section class="card admin-portal-alert">
+  <div><strong>Portal do cliente</strong><span>{{ portal_alerts['accesses'] }} acesso(s) pendente(s) e {{ portal_alerts['proofs'] }} comprovante(s) em análise.</span></div>
+  <div class="actions"><a class="button button-secondary button-small" href="{{ url_for('portal.admin_accesses') }}">Acessos</a><a class="button button-small" href="{{ url_for('portal.admin_proofs') }}">Comprovantes</a></div>
+</section>
+{% endif %}
+
 <div class="page-header">
     <div>
         <h1>Dashboard</h1>
