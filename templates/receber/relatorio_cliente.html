@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}Relatório de contas a receber{% endblock %}
+
+{% block content %}
+<div class="page-header receivables-report-header">
+    <div>
+        <h1>Relatório de contas a receber</h1>
+        <p class="muted">
+            Títulos por cliente, situação e período de vencimento.
+        </p>
+    </div>
+
+    {% if cliente %}
+    <div class="actions no-print">
+        <button class="button button-secondary" type="button" onclick="window.print()">
+            Imprimir / PDF
+        </button>
+        <a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">
+            Voltar a receber
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<section class="card section-card no-print">
+    <form method="get" class="receivables-report-filter">
+        <label>
+            Cliente
+            <select name="cliente_id" required>
+                <option value="">Selecione...</option>
+                {% for item in clientes %}
+                    <option
+                        value="{{ item['id'] }}"
+                        {{ 'selected' if cliente and cliente['id'] == item['id'] }}
+                    >
+                        {{ item['nome'] }}{% if not item['ativo'] %} — inativo{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Situação
+            <select name="status">
+                <option value="abertos" {{ 'selected' if status == 'abertos' }}>Em aberto</option>
+                <option value="previsto" {{ 'selected' if status == 'previsto' }}>Pendentes</option>
+                <option value="vencido" {{ 'selected' if status == 'vencido' }}>Vencidos</option>
+                <option value="parcial" {{ 'selected' if status == 'parcial' }}>Parciais</option>
+                <option value="recebido" {{ 'selected' if status == 'recebido' }}>Pagos</option>
+                <option value="cancelado" {{ 'selected' if status == 'cancelado' }}>Cancelados</option>
+                <option value="todos" {{ 'selected' if status == 'todos' }}>Todos</option>
+            </select>
+        </label>
+
+        <label>
+            Vencimento inicial
+            <input type="date" name="data_inicio" value="{{ data_inicio }}">
+        </label>
+
+        <label>
+            Vencimento final
+            <input type="date" name="data_fim" value="{{ data_fim }}">
+        </label>
+
+        <label>
+            PIX cadastrado para mensagem
+            <select name="pix_conta_id">
+                <option value="">Não incluir</option>
+                {% for conta in contas_pix %}
+                    <option
+                        value="{{ conta['id'] }}"
+                        {{ 'selected' if pix_conta_id == conta['id'] }}
+                    >
+                        {{ conta['banco'] }}
+                        {% if conta['descricao'] %} — {{ conta['descricao'] }}{% endif %}
+                        — {{ conta['chave_pix'] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Ou PIX apenas para esta mensagem
+            <input
+                type="text"
+                name="pix_manual"
+                value="{{ pix_manual }}"
+                maxlength="180"
+                placeholder="Opcional; não será salvo"
+            >
+        </label>
+
+        <div class="report-filter-actions">
+            <button class="button button-secondary" type="submit">Gerar relatório</button>
+            {% if cliente %}
+            <a
+                class="button button-light"
+                href="{{ url_for('titulos_receber_relatorio', cliente_id=cliente['id']) }}"
+            >
+                Limpar filtros
+            </a>
+            {% endif %}
+        </div>
+    </form>
+
+    <p class="filter-help">
+        O período é aplicado pela data de vencimento. O PIX informado manualmente
+        é usado somente para montar a mensagem e não é persistido.
+    </p>
+</section>
+
+{% if not cliente %}
+<section class="card section-card">
+    <div class="empty-state">
+        Selecione um cliente para gerar o relatório.
+    </div>
+</section>
+{% else %}
+
+<section class="receivables-print-identification">
+    <div>
+        <span class="report-kicker">Contas a receber</span>
+        <h2>{{ cliente['nome'] }}</h2>
+    </div>
+
+    <dl>
+        <div>
+            <dt>Situação</dt>
+            <dd>
+                {% if status == 'abertos' %}Em aberto
+                {% elif status == 'previsto' %}Pendentes
+                {% elif status == 'vencido' %}Vencidos
+                {% elif status == 'parcial' %}Parciais
+                {% elif status == 'recebido' %}Pagos
+                {% elif status == 'cancelado' %}Cancelados
+                {% else %}Todos{% endif %}
+            </dd>
+        </div>
+        <div>
+            <dt>Período</dt>
+            <dd>
+                {% if data_inicio or data_fim %}
+                    {{ data_inicio|date_br if data_inicio else 'início' }}
+                    a
+                    {{ data_fim|date_br if data_fim else 'hoje/futuro' }}
+                {% else %}
+                    Todos os vencimentos
+                {% endif %}
+            </dd>
+        </div>
+    </dl>
+</section>
+
+<p class="privacy-report-note">
+    Relatório apresenta somente os dados necessários para identificação da
+    obrigação financeira. Dados cadastrais sensíveis não são exibidos.
+</p>
+
+<div class="metrics-grid receivables-report-metrics">
+    <section class="card metric-card">
+        <span>Títulos no relatório</span>
+        <strong>{{ resumo['quantidade'] }}</strong>
+    </section>
+
+    <section class="card metric-card">
+        <span>Valor dos títulos</span>
+        <strong>{{ resumo['valor_total_centavos']|money }}</strong>
+    </section>
+
+    <section class="card metric-card">
+        <span>Já recebido</span>
+        <strong>{{ resumo['valor_recebido_centavos']|money }}</strong>
+    </section>
+
+    <section class="card metric-card">
+        <span>Saldo em aberto</span>
+        <strong>{{ resumo['saldo_em_aberto_centavos']|money }}</strong>
+    </section>
+</div>
+
+<section class="card section-card receivables-report-table-card">
+    <div class="section-title-row">
+        <div>
+            <h2>Títulos</h2>
+            <p class="muted section-subtitle">
+                Ordene as colunas clicando no cabeçalho.
+            </p>
+        </div>
+    </div>
+
+    {% if titulos %}
+    <div class="table-responsive">
+        <table class="receivables-report-table" data-sortable="true">
+            <thead>
+                <tr>
+                    <th>Vencimento</th>
+                    <th>Contrato</th>
+                    <th>Competência</th>
+                    <th>Documento</th>
+                    <th class="text-right">Valor</th>
+                    <th class="text-right">Recebido</th>
+                    <th class="text-right">Saldo</th>
+                    <th>Status</th>
+                    <th>Recebido em</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for titulo in titulos %}
+                {% set saldo = (
+                    titulo['valor_previsto_centavos'] - titulo['valor_recebido_centavos']
+                    if titulo['status'] in ['PREVISTO', 'VENCIDO', 'PARCIAL']
+                    else 0
+                ) %}
+                <tr>
+                    <td class="nowrap">{{ titulo['data_vencimento']|date_br }}</td>
+                    <td>
+                        #{{ titulo['emprestimo_id'] }}
+                        {% if titulo['emprestimo_descricao'] %}
+                            <br><small>{{ titulo['emprestimo_descricao'] }}</small>
+                        {% endif %}
+                    </td>
+                    <td>{{ titulo['competencia']|competencia_br }}</td>
+                    <td>
+                        {% if titulo['natureza'] == 'SALDO_JUROS' %}
+                            Saldo de juros
+                            {% if titulo['titulo_origem_id'] %}
+                                <br><small>origem #{{ titulo['titulo_origem_id'] }}</small>
+                            {% endif %}
+                        {% else %}
+                            Juros
+                        {% endif %}
+                    </td>
+                    <td class="text-right nowrap">
+                        {{ titulo['valor_previsto_centavos']|money }}
+                    </td>
+                    <td class="text-right nowrap">
+                        {{ titulo['valor_recebido_centavos']|money }}
+                    </td>
+                    <td class="text-right nowrap">
+                        <strong>{{ saldo|money }}</strong>
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ titulo['status']|titulo_status|lower }}">
+                            {{ titulo['status']|titulo_status }}
+                        </span>
+                    </td>
+                    <td class="nowrap">
+                        {{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            Nenhum título encontrado para os filtros informados.
+        </div>
+    {% endif %}
+</section>
+
+{% if mensagem_cobranca %}
+<section class="card section-card collection-message-card no-print">
+    <div class="section-title-row">
+        <div>
+            <h2>Mensagem de cobrança</h2>
+            <p class="muted section-subtitle">
+                Somente títulos atualmente em aberto são incluídos na mensagem.
+            </p>
+        </div>
+
+        <div class="actions wrap-actions">
+            <button
+                type="button"
+                class="button button-light"
+                id="copy-collection-message"
+            >
+                Copiar mensagem
+            </button>
+
+            <a
+                class="button whatsapp-button"
+                href="{{ whatsapp_url }}"
+                target="_blank"
+                rel="noopener noreferrer"
+            >
+                Abrir no WhatsApp
+            </a>
+        </div>
+    </div>
+
+    <div class="collection-message-summary">
+        <div>
+            <span>Títulos cobrados</span>
+            <strong>{{ resumo['quantidade_cobravel'] }}</strong>
+        </div>
+        <div>
+            <span>Total da mensagem</span>
+            <strong>{{ resumo['total_cobravel_centavos']|money }}</strong>
+        </div>
+    </div>
+
+    <textarea
+        id="collection-message-text"
+        class="collection-message-text"
+        rows="12"
+        readonly
+    >{{ mensagem_cobranca }}</textarea>
+
+    <p class="field-help">
+        O telefone cadastrado é usado somente para direcionar a abertura do
+        WhatsApp e não é exibido no relatório. Se não houver telefone válido,
+        o WhatsApp abrirá a seleção de contatos.
+    </p>
+</section>
+{% elif titulos %}
+<section class="card section-card no-print">
+    <div class="empty-state">
+        Os filtros atuais não possuem títulos em aberto para gerar mensagem de cobrança.
+    </div>
+</section>
+{% endif %}
+
+<script class="no-print">
+(() => {
+    const button = document.getElementById('copy-collection-message');
+    const textarea = document.getElementById('collection-message-text');
+
+    if (!button || !textarea) return;
+
+    button.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(textarea.value);
+            const original = button.textContent;
+            button.textContent = 'Copiado';
+            setTimeout(() => {
+                button.textContent = original;
+            }, 1800);
+        } catch (error) {
+            textarea.focus();
+            textarea.select();
+            document.execCommand('copy');
+        }
+    });
+})();
+</script>
+
+{% endif %}
+{% endblock %}

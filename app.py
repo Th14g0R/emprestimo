@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, TypeVar
+from urllib.parse import quote
 
 from flask import (
     Flask,
@@ -26,7 +27,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "21.0-report-status-sort"
+APP_VERSION = "22.0-receivables-client-whatsapp"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -4617,6 +4618,227 @@ def register_routes(app: Flask) -> None:
         )
 
 
+    # -------------------- Relatório de contas a receber por cliente --------------------
+
+    @app.get("/receber/relatorio")
+    @login_required
+    def titulos_receber_relatorio():
+        db = get_db()
+        sync_receivable_titles(db)
+
+        clientes = db.execute(
+            """
+            SELECT c.id, c.nome, c.telefone, c.ativo
+              FROM clientes c
+             WHERE EXISTS (
+                 SELECT 1
+                   FROM emprestimos e
+                  WHERE e.cliente_id = c.id
+             )
+             ORDER BY c.ativo DESC, c.nome COLLATE NOCASE
+            """
+        ).fetchall()
+
+        cliente_id = parse_int(request.args.get("cliente_id"))
+        status = request.args.get("status", "abertos").strip().lower()
+        data_inicio_text = request.args.get("data_inicio", "").strip()
+        data_fim_text = request.args.get("data_fim", "").strip()
+        pix_conta_id = parse_int(request.args.get("pix_conta_id"))
+        pix_manual = request.args.get("pix_manual", "").strip()
+
+        cliente = None
+        titulos: list[sqlite3.Row] = []
+        cobraveis: list[dict[str, Any]] = []
+        mensagem_cobranca = ""
+        whatsapp_url = ""
+        resumo = {
+            "quantidade": 0,
+            "valor_total_centavos": 0,
+            "valor_recebido_centavos": 0,
+            "saldo_em_aberto_centavos": 0,
+            "quantidade_cobravel": 0,
+            "total_cobravel_centavos": 0,
+        }
+
+        data_inicio = parse_iso_date(data_inicio_text)
+        data_fim = parse_iso_date(data_fim_text)
+
+        if data_inicio_text and data_inicio is None:
+            flash("Data inicial inválida.", "warning")
+
+        if data_fim_text and data_fim is None:
+            flash("Data final inválida.", "warning")
+
+        if (
+            data_inicio is not None
+            and data_fim is not None
+            and data_inicio > data_fim
+        ):
+            flash(
+                "A data inicial não pode ser posterior à data final.",
+                "warning",
+            )
+            data_inicio = None
+            data_fim = None
+
+        contas_pix = [
+            conta
+            for conta in get_own_accounts()
+            if normalize_optional(conta["chave_pix"])
+        ]
+
+        pix_key = pix_manual
+
+        if not pix_key and pix_conta_id is not None:
+            conta_pix = next(
+                (
+                    conta
+                    for conta in contas_pix
+                    if int(conta["id"]) == pix_conta_id
+                ),
+                None,
+            )
+            if conta_pix is not None:
+                pix_key = str(conta_pix["chave_pix"]).strip()
+
+        if cliente_id is not None:
+            cliente = db.execute(
+                """
+                SELECT id, nome, telefone, ativo
+                  FROM clientes
+                 WHERE id = ?
+                """,
+                (cliente_id,),
+            ).fetchone()
+
+            if cliente is None:
+                abort(404)
+
+            sql = """
+                SELECT
+                    t.id, t.tipo, t.competencia, t.data_vencimento,
+                    t.valor_previsto_centavos, t.valor_recebido_centavos,
+                    t.status, t.data_recebimento, t.observacao,
+                    t.titulo_origem_id, t.natureza, t.sequencia,
+                    e.id AS emprestimo_id,
+                    e.descricao AS emprestimo_descricao,
+                    c.id AS cliente_id,
+                    c.nome AS cliente_nome
+                  FROM titulos_receber t
+                  JOIN emprestimos e ON e.id = t.emprestimo_id
+                  JOIN clientes c ON c.id = e.cliente_id
+                 WHERE c.id = ?
+            """
+            params: list[Any] = [cliente_id]
+
+            if status == "abertos":
+                sql += " AND t.status IN ('PREVISTO', 'VENCIDO')"
+            elif status in {
+                "previsto",
+                "vencido",
+                "parcial",
+                "recebido",
+                "cancelado",
+            }:
+                sql += " AND t.status = ?"
+                params.append(status.upper())
+            elif status != "todos":
+                status = "abertos"
+                sql += " AND t.status IN ('PREVISTO', 'VENCIDO')"
+
+            if data_inicio is not None:
+                sql += " AND t.data_vencimento >= ?"
+                params.append(data_inicio.isoformat())
+
+            if data_fim is not None:
+                sql += " AND t.data_vencimento <= ?"
+                params.append(data_fim.isoformat())
+
+            sql += """
+                ORDER BY
+                    t.data_vencimento,
+                    e.id,
+                    t.sequencia,
+                    t.id
+            """
+
+            titulos = db.execute(sql, params).fetchall()
+
+            valor_total = 0
+            valor_recebido = 0
+            saldo_aberto = 0
+
+            for row in titulos:
+                valor = int(row["valor_previsto_centavos"] or 0)
+                recebido = int(row["valor_recebido_centavos"] or 0)
+                saldo = titulo_saldo_relatorio_centavos(row)
+
+                valor_total += valor
+                valor_recebido += recebido
+                saldo_aberto += saldo
+
+                if row["status"] in {"PREVISTO", "VENCIDO"} and saldo > 0:
+                    item = dict(row)
+                    item["saldo_em_aberto_centavos"] = saldo
+                    cobraveis.append(item)
+
+            total_cobravel = sum(
+                int(item["saldo_em_aberto_centavos"])
+                for item in cobraveis
+            )
+
+            resumo = {
+                "quantidade": len(titulos),
+                "valor_total_centavos": valor_total,
+                "valor_recebido_centavos": valor_recebido,
+                "saldo_em_aberto_centavos": saldo_aberto,
+                "quantidade_cobravel": len(cobraveis),
+                "total_cobravel_centavos": total_cobravel,
+            }
+
+            if cobraveis:
+                mensagem_cobranca = build_receivables_collection_message(
+                    cliente["nome"],
+                    cobraveis,
+                    pix_key or None,
+                )
+
+                telefone = normalize_whatsapp_number_br(
+                    cliente["telefone"]
+                )
+                encoded_message = quote(
+                    mensagem_cobranca,
+                    safe="",
+                )
+
+                if telefone:
+                    whatsapp_url = (
+                        f"https://wa.me/{telefone}?text={encoded_message}"
+                    )
+                else:
+                    whatsapp_url = (
+                        f"https://wa.me/?text={encoded_message}"
+                    )
+
+        return render_template(
+            "receber/relatorio_cliente.html",
+            clientes=clientes,
+            cliente=cliente,
+            titulos=titulos,
+            cobraveis=cobraveis,
+            resumo=resumo,
+            status=status,
+            data_inicio=data_inicio_text,
+            data_fim=data_fim_text,
+            contas_pix=contas_pix,
+            pix_conta_id=pix_conta_id,
+            pix_manual=pix_manual,
+            pix_key=pix_key,
+            mensagem_cobranca=mensagem_cobranca,
+            whatsapp_url=whatsapp_url,
+        )
+
+
     # -------------------- Agenda / Títulos a receber --------------------
 
     @app.get("/receber")
@@ -6821,6 +7043,116 @@ def extrato_movimentacoes_cliente(
         "fluxo_liquido_centavos": total_entradas - total_saidas,
         "saldo_principal_final_centavos": saldo_principal,
     }
+
+
+def normalize_whatsapp_number_br(value: str | None) -> str | None:
+    """
+    Normaliza telefone brasileiro para o formato internacional exigido pelo
+    wa.me. Não altera nem persiste o telefone cadastrado.
+    """
+    digits = re.sub(r"\D+", "", value or "")
+
+    if not digits:
+        return None
+
+    if digits.startswith("55") and len(digits) in {12, 13}:
+        return digits
+
+    if len(digits) in {10, 11}:
+        return f"55{digits}"
+
+    # Para números internacionais já completos, aceita somente comprimentos
+    # plausíveis. O WhatsApp fará a validação final da conta.
+    if 11 <= len(digits) <= 15:
+        return digits
+
+    return None
+
+
+def titulo_saldo_relatorio_centavos(titulo: sqlite3.Row | dict[str, Any]) -> int:
+    """
+    Saldo financeiro do título para relatórios.
+
+    PREVISTO/VENCIDO: valor integral ainda devido.
+    PARCIAL: somente o saldo do próprio documento.
+    RECEBIDO/CANCELADO: sem saldo em aberto.
+    """
+    valor = int(titulo["valor_previsto_centavos"] or 0)
+    recebido = int(titulo["valor_recebido_centavos"] or 0)
+    status = str(titulo["status"] or "").upper()
+
+    if status in {"PREVISTO", "VENCIDO"}:
+        return max(valor - recebido, 0)
+
+    if status == "PARCIAL":
+        return max(valor - recebido, 0)
+
+    return 0
+
+
+def build_receivables_collection_message(
+    cliente_nome: str,
+    titulos: list[dict[str, Any]],
+    pix_key: str | None = None,
+) -> str:
+    """
+    Gera mensagem objetiva e não intrusiva para cobrança.
+
+    Os títulos recebidos aqui devem ser somente documentos efetivamente
+    cobraveis, evitando CPF, telefone, endereço, e-mail ou qualquer outro dado
+    cadastral do cliente.
+    """
+    lines = [
+        f"Olá, {cliente_nome}.",
+        "",
+        "Segue o resumo dos títulos em aberto:",
+    ]
+
+    total = 0
+
+    for item in titulos:
+        saldo = int(item["saldo_em_aberto_centavos"])
+        total += saldo
+
+        natureza = (
+            "Saldo de juros"
+            if item["natureza"] == "SALDO_JUROS"
+            else "Juros"
+        )
+        status = format_titulo_status(item["status"])
+        competencia = format_competencia_br(item["competencia"])
+        vencimento = format_date_br(item["data_vencimento"])
+
+        lines.append(
+            f"- {vencimento} | {natureza} {competencia} | "
+            f"Empréstimo #{item['emprestimo_id']} | "
+            f"{format_money(saldo)} | {status}"
+        )
+
+    lines.extend(
+        [
+            "",
+            f"Total a receber: {format_money(total)}.",
+        ]
+    )
+
+    if pix_key:
+        lines.extend(
+            [
+                "",
+                f"PIX para pagamento: {pix_key}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "Caso algum item já tenha sido pago, por favor desconsidere "
+            "este aviso e me informe para conferência.",
+        ]
+    )
+
+    return "\n".join(lines)
 
 
 def get_cliente_or_404(cliente_id: int) -> sqlite3.Row:

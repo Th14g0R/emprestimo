@@ -1719,3 +1719,207 @@ tbody tr:hover {
         display: none !important;
     }
 }
+
+
+/* V22 - Relatório de contas a receber / cobrança */
+.receivables-report-filter {
+    display: grid;
+    grid-template-columns:
+        minmax(220px, 1.5fr)
+        minmax(150px, .8fr)
+        minmax(145px, .75fr)
+        minmax(145px, .75fr)
+        minmax(220px, 1.2fr)
+        minmax(220px, 1.2fr);
+    gap: .75rem;
+    align-items: end;
+}
+
+.receivables-report-filter label {
+    display: grid;
+    gap: .3rem;
+    font-weight: 700;
+}
+
+.report-filter-actions {
+    display: flex;
+    gap: .5rem;
+    grid-column: 1 / -1;
+}
+
+.receivables-print-identification {
+    display: flex;
+    justify-content: space-between;
+    align-items: end;
+    gap: 1.5rem;
+    margin-bottom: .8rem;
+    padding: .95rem 1.1rem;
+    border: 1px solid var(--border);
+    border-radius: .8rem;
+    background: #fff;
+}
+
+.receivables-print-identification h2 {
+    margin: .12rem 0 0;
+}
+
+.receivables-print-identification dl {
+    display: flex;
+    gap: 2rem;
+    margin: 0;
+}
+
+.receivables-print-identification dl > div {
+    display: grid;
+    gap: .15rem;
+}
+
+.receivables-print-identification dt {
+    color: var(--muted);
+    font-size: .75rem;
+}
+
+.receivables-print-identification dd {
+    margin: 0;
+    font-weight: 800;
+}
+
+.report-kicker {
+    display: block;
+    color: var(--muted);
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+}
+
+.privacy-report-note {
+    margin: -.25rem 0 .9rem;
+    color: var(--muted);
+    font-size: .78rem;
+}
+
+.receivables-report-metrics {
+    margin-bottom: 1rem;
+}
+
+.receivables-report-table {
+    min-width: 900px;
+}
+
+.collection-message-card {
+    margin-top: 1rem;
+}
+
+.collection-message-summary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 220px));
+    gap: .7rem;
+    margin: .9rem 0;
+}
+
+.collection-message-summary > div {
+    display: flex;
+    flex-direction: column;
+    gap: .12rem;
+    padding: .7rem .8rem;
+    border: 1px solid var(--border);
+    border-radius: .65rem;
+    background: #f8fafc;
+}
+
+.collection-message-summary span {
+    color: var(--muted);
+    font-size: .78rem;
+}
+
+.collection-message-summary strong {
+    font-size: 1rem;
+}
+
+.collection-message-text {
+    width: 100%;
+    min-height: 240px;
+    resize: vertical;
+    line-height: 1.55;
+    font-family: inherit;
+}
+
+.whatsapp-button {
+    background: #128c4a;
+    border-color: #128c4a;
+    color: #fff;
+}
+
+.whatsapp-button:hover {
+    background: #0f7a40;
+    border-color: #0f7a40;
+    color: #fff;
+}
+
+@media (max-width: 1200px) {
+    .receivables-report-filter {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 800px) {
+    .receivables-report-filter {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .receivables-print-identification {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .receivables-print-identification dl {
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 560px) {
+    .receivables-report-filter,
+    .collection-message-summary {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media print {
+    .receivables-print-identification {
+        border: none;
+        border-bottom: 1px solid #999;
+        border-radius: 0;
+        padding: 0 0 3mm;
+        margin-bottom: 3mm;
+    }
+
+    .privacy-report-note {
+        font-size: 7pt;
+        margin-bottom: 3mm;
+    }
+
+    .receivables-report-metrics {
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 2mm !important;
+    }
+
+    .receivables-report-metrics .metric-card {
+        padding: 2.5mm !important;
+    }
+
+    .receivables-report-metrics .metric-card strong {
+        font-size: 11pt !important;
+    }
+
+    .receivables-report-table {
+        min-width: 0 !important;
+        width: 100% !important;
+        font-size: 7.5pt !important;
+    }
+
+    .receivables-report-table th,
+    .receivables-report-table td {
+        padding: 1.4mm !important;
+    }
+}
