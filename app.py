@@ -27,7 +27,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "24.0-portal-admin-upload-consolidated"
+APP_VERSION = "25.0-client-statement-filters"
 
 
 BASE_DIR = Path(__file__).resolve().parent

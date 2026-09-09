@@ -1943,3 +1943,140 @@ tbody tr:hover {
 .admin-inline-review>summary.button::-webkit-details-marker{display:none;}
 @media(max-width:900px){.portal-access-summary{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:560px){.portal-access-summary{grid-template-columns:1fr;}.readonly-portal-notice{flex-direction:column;}}
+
+
+/* V25 - Extrato do cliente */
+.portal-statement-filters {
+    display: grid;
+    grid-template-columns:
+        minmax(170px, 1fr)
+        minmax(150px, .9fr)
+        minmax(110px, .6fr)
+        minmax(210px, 1.25fr)
+        minmax(170px, 1fr)
+        minmax(145px, .8fr)
+        minmax(145px, .8fr);
+    gap: .7rem;
+    align-items: end;
+}
+
+.portal-statement-filters label {
+    display: grid;
+    gap: .3rem;
+    font-weight: 700;
+}
+
+.portal-statement-filter-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: .5rem;
+}
+
+.portal-statement-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-bottom: 1rem;
+}
+
+.portal-statement-section {
+    margin-bottom: 1rem;
+}
+
+.portal-statement-table {
+    min-width: 980px;
+}
+
+.report-count {
+    color: var(--muted);
+    font-size: .8rem;
+    white-space: nowrap;
+}
+
+.statement-link-badge {
+    display: inline-block;
+    margin-top: .18rem;
+    padding: .15rem .4rem;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #3730a3;
+    font-size: .7rem;
+    font-weight: 800;
+}
+
+.portal-statement-identification {
+    display: none;
+}
+
+.portal-statement-identification > div {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+}
+
+@media (max-width: 1250px) {
+    .portal-statement-filters {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 850px) {
+    .portal-statement-filters {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .portal-statement-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 560px) {
+    .portal-statement-filters,
+    .portal-statement-metrics {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media print {
+    .portal-statement-identification {
+        display: flex !important;
+        justify-content: space-between;
+        gap: 2rem;
+        padding-bottom: 3mm;
+        margin-bottom: 4mm;
+        border-bottom: 1px solid #888;
+    }
+
+    .portal-statement-metrics {
+        grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+        gap: 2mm !important;
+    }
+
+    .portal-statement-metrics .metric-card {
+        padding: 2mm !important;
+    }
+
+    .portal-statement-metrics .metric-card span,
+    .portal-statement-metrics .metric-card small {
+        font-size: 6.5pt !important;
+    }
+
+    .portal-statement-metrics .metric-card strong {
+        font-size: 9pt !important;
+    }
+
+    .portal-statement-table {
+        min-width: 0 !important;
+        width: 100% !important;
+        font-size: 7pt !important;
+    }
+
+    .portal-statement-table th,
+    .portal-statement-table td {
+        padding: 1.2mm !important;
+    }
+
+    .statement-link-badge {
+        background: transparent !important;
+        color: #000 !important;
+        border: 1px solid #aaa;
+    }
+}

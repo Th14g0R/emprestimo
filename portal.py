@@ -489,6 +489,367 @@ def dashboard():
     db=get_db(); cid=int(g.portal_access['cliente_id']); sync_receivable_titles(db); resumo=resumo_financeiro_cliente(db,cid); loans=posicao_emprestimos_cliente(db,cid); cards=card_summaries(cid); titles=db.execute("SELECT t.id,t.competencia,t.data_vencimento,t.valor_previsto_centavos,t.status,t.natureza,e.id emprestimo_id,e.descricao emprestimo_descricao FROM titulos_receber t JOIN emprestimos e ON e.id=t.emprestimo_id WHERE e.cliente_id=? AND t.status IN ('PREVISTO','VENCIDO') ORDER BY t.data_vencimento,e.id,t.id",(cid,)).fetchall(); proofs=db.execute("SELECT id,data_pagamento,valor_total_centavos,status,created_at FROM comprovantes_pagamento WHERE cliente_id=? ORDER BY created_at DESC,id DESC LIMIT 10",(cid,)).fetchall(); return render_template('portal/dashboard.html',resumo=resumo,emprestimos=loans,cartoes=cards,titulos=titles,comprovantes=proofs)
 
 
+
+@bp.get('/portal/extrato')
+@portal_required
+def statement():
+    """
+    Extrato financeiro do cliente autenticado.
+
+    A identificação do cliente vem exclusivamente da sessão aprovada.
+    Nenhum cliente_id é aceito pela URL, evitando consulta a dados de terceiros.
+    """
+    db = get_db()
+    cid = int(g.portal_access['cliente_id'])
+    sync_receivable_titles(db)
+
+    today = date.today()
+
+    situacao = request.args.get('situacao', 'todos').strip().lower()
+    periodo = request.args.get('periodo', 'ano_atual').strip().lower()
+    tipo_movimento = (
+        request.args.get('tipo_movimento', 'todos').strip().upper()
+    )
+    contrato_id = parse_int(request.args.get('contrato_id'))
+    ano = parse_int(request.args.get('ano'))
+
+    allowed_situations = {
+        'todos',
+        'abertos',
+        'pendentes',
+        'atrasados',
+        'pagos',
+        'parciais',
+        'liquidados',
+    }
+    if situacao not in allowed_situations:
+        situacao = 'todos'
+
+    allowed_periods = {
+        'mes_atual',
+        'ano_atual',
+        'ano',
+        'personalizado',
+        'completo',
+    }
+    if periodo not in allowed_periods:
+        periodo = 'ano_atual'
+
+    allowed_movement_types = {
+        'TODOS',
+        'JUROS',
+        'ABATIMENTO',
+        'QUITACAO',
+        'EMPRESTIMO',
+    }
+    if tipo_movimento not in allowed_movement_types:
+        tipo_movimento = 'TODOS'
+
+    contratos = db.execute(
+        """
+        SELECT id, descricao, data_emprestimo, status
+          FROM emprestimos
+         WHERE cliente_id = ?
+         ORDER BY data_emprestimo, id
+        """,
+        (cid,),
+    ).fetchall()
+
+    contract_ids = {int(row['id']) for row in contratos}
+    if contrato_id is not None and contrato_id not in contract_ids:
+        contrato_id = None
+
+    # Anos disponíveis a partir dos movimentos, títulos e contratos.
+    year_rows = db.execute(
+        """
+        SELECT ano
+          FROM (
+                SELECT substr(m.data_movimento, 1, 4) AS ano
+                  FROM movimentacoes_emprestimo m
+                  JOIN emprestimos e ON e.id = m.emprestimo_id
+                 WHERE e.cliente_id = ?
+
+                UNION
+
+                SELECT substr(t.data_vencimento, 1, 4) AS ano
+                  FROM titulos_receber t
+                  JOIN emprestimos e ON e.id = t.emprestimo_id
+                 WHERE e.cliente_id = ?
+
+                UNION
+
+                SELECT substr(e.data_emprestimo, 1, 4) AS ano
+                  FROM emprestimos e
+                 WHERE e.cliente_id = ?
+          )
+         WHERE ano IS NOT NULL
+           AND length(ano) = 4
+         ORDER BY ano DESC
+        """,
+        (cid, cid, cid),
+    ).fetchall()
+
+    anos = sorted(
+        {
+            int(row['ano'])
+            for row in year_rows
+            if str(row['ano']).isdigit()
+        }
+        | {today.year},
+        reverse=True,
+    )
+
+    start_date = None
+    end_date = None
+    data_inicio_text = request.args.get('data_inicio', '').strip()
+    data_fim_text = request.args.get('data_fim', '').strip()
+
+    if periodo == 'mes_atual':
+        start_date = today.replace(day=1)
+        if today.month == 12:
+            next_month = date(today.year + 1, 1, 1)
+        else:
+            next_month = date(today.year, today.month + 1, 1)
+        end_date = next_month - timedelta(days=1)
+
+    elif periodo == 'ano_atual':
+        start_date = date(today.year, 1, 1)
+        end_date = date(today.year, 12, 31)
+
+    elif periodo == 'ano':
+        if ano is None or ano < 2000 or ano > 2100:
+            ano = today.year
+        start_date = date(ano, 1, 1)
+        end_date = date(ano, 12, 31)
+
+    elif periodo == 'personalizado':
+        start_date = (
+            parse_iso_date(data_inicio_text)
+            if data_inicio_text
+            else None
+        )
+        end_date = (
+            parse_iso_date(data_fim_text)
+            if data_fim_text
+            else None
+        )
+
+        if data_inicio_text and start_date is None:
+            flash('Data inicial inválida.', 'warning')
+        if data_fim_text and end_date is None:
+            flash('Data final inválida.', 'warning')
+
+        if (
+            start_date is not None
+            and end_date is not None
+            and start_date > end_date
+        ):
+            flash(
+                'A data inicial não pode ser posterior à data final.',
+                'warning',
+            )
+            start_date = None
+            end_date = None
+
+    # periodo == completo mantém start_date/end_date como None.
+
+    # -----------------------------------------------------------------
+    # Títulos
+    # -----------------------------------------------------------------
+    title_sql = """
+        SELECT
+            t.id,
+            t.competencia,
+            t.data_vencimento,
+            t.valor_previsto_centavos,
+            t.valor_recebido_centavos,
+            t.status,
+            t.data_recebimento,
+            t.natureza,
+            t.sequencia,
+            t.titulo_origem_id,
+            e.id AS emprestimo_id,
+            e.descricao AS emprestimo_descricao,
+            e.status AS emprestimo_status
+          FROM titulos_receber t
+          JOIN emprestimos e ON e.id = t.emprestimo_id
+         WHERE e.cliente_id = ?
+           AND t.status <> 'CANCELADO'
+    """
+    title_params = [cid]
+
+    if contrato_id is not None:
+        title_sql += " AND e.id = ?"
+        title_params.append(contrato_id)
+
+    if situacao == 'abertos':
+        title_sql += " AND t.status IN ('PREVISTO', 'VENCIDO')"
+    elif situacao == 'pendentes':
+        title_sql += " AND t.status = 'PREVISTO'"
+    elif situacao == 'atrasados':
+        title_sql += " AND t.status = 'VENCIDO'"
+    elif situacao == 'pagos':
+        title_sql += " AND t.status = 'RECEBIDO'"
+    elif situacao == 'parciais':
+        title_sql += " AND t.status = 'PARCIAL'"
+    elif situacao == 'liquidados':
+        title_sql += " AND e.status = 'QUITADO'"
+
+    if start_date is not None:
+        title_sql += " AND t.data_vencimento >= ?"
+        title_params.append(start_date.isoformat())
+
+    if end_date is not None:
+        title_sql += " AND t.data_vencimento <= ?"
+        title_params.append(end_date.isoformat())
+
+    title_sql += """
+        ORDER BY t.data_vencimento DESC, e.id DESC, t.id DESC
+    """
+
+    title_rows = db.execute(
+        title_sql,
+        title_params,
+    ).fetchall()
+
+    titulos = []
+    total_titulos = 0
+    total_recebido_titulos = 0
+    total_aberto = 0
+    total_atrasado = 0
+
+    for row in title_rows:
+        item = dict(row)
+        valor = int(row['valor_previsto_centavos'] or 0)
+        recebido = int(row['valor_recebido_centavos'] or 0)
+        status = str(row['status'] or '').upper()
+
+        # Quando um título fica PARCIAL, o saldo residual é transferido para
+        # um novo SALDO_JUROS. Portanto o documento parcial não é contado
+        # novamente como saldo em aberto.
+        saldo_documento = (
+            max(valor - recebido, 0)
+            if status in {'PREVISTO', 'VENCIDO'}
+            else 0
+        )
+
+        item['saldo_documento_centavos'] = saldo_documento
+        titulos.append(item)
+
+        total_titulos += valor
+        total_recebido_titulos += recebido
+
+        if status in {'PREVISTO', 'VENCIDO'}:
+            total_aberto += saldo_documento
+
+        if status == 'VENCIDO':
+            total_atrasado += saldo_documento
+
+    # -----------------------------------------------------------------
+    # Movimentações / histórico real
+    # -----------------------------------------------------------------
+    movement_sql = """
+        SELECT
+            m.id,
+            m.tipo,
+            m.data_movimento,
+            m.valor_centavos,
+            m.competencia,
+            m.saldo_antes_centavos,
+            m.saldo_depois_centavos,
+            m.pagamento_integrado_id,
+            m.titulo_receber_id,
+            e.id AS emprestimo_id,
+            e.descricao AS emprestimo_descricao,
+            e.status AS emprestimo_status,
+            cp.id AS comprovante_id
+          FROM movimentacoes_emprestimo m
+          JOIN emprestimos e ON e.id = m.emprestimo_id
+          LEFT JOIN comprovantes_pagamento cp
+                 ON cp.pagamento_integrado_id = m.pagamento_integrado_id
+                AND cp.status = 'CONFIRMADO'
+         WHERE e.cliente_id = ?
+    """
+    movement_params = [cid]
+
+    if contrato_id is not None:
+        movement_sql += " AND e.id = ?"
+        movement_params.append(contrato_id)
+
+    if tipo_movimento != 'TODOS':
+        movement_sql += " AND m.tipo = ?"
+        movement_params.append(tipo_movimento)
+
+    if start_date is not None:
+        movement_sql += " AND m.data_movimento >= ?"
+        movement_params.append(start_date.isoformat())
+
+    if end_date is not None:
+        movement_sql += " AND m.data_movimento <= ?"
+        movement_params.append(end_date.isoformat())
+
+    # "Contratos liquidados" também limita o histórico aos contratos quitados.
+    if situacao == 'liquidados':
+        movement_sql += " AND e.status = 'QUITADO'"
+
+    movement_sql += """
+        ORDER BY m.data_movimento DESC, m.id DESC
+    """
+
+    movimentos = db.execute(
+        movement_sql,
+        movement_params,
+    ).fetchall()
+
+    total_pago_periodo = 0
+    juros_pagos_periodo = 0
+    principal_pago_periodo = 0
+    credito_recebido_periodo = 0
+
+    for mov in movimentos:
+        valor = int(mov['valor_centavos'] or 0)
+
+        if mov['tipo'] == 'JUROS':
+            juros_pagos_periodo += valor
+            total_pago_periodo += valor
+        elif mov['tipo'] in {'ABATIMENTO', 'QUITACAO'}:
+            principal_pago_periodo += valor
+            total_pago_periodo += valor
+        elif mov['tipo'] == 'EMPRESTIMO':
+            credito_recebido_periodo += valor
+
+    resumo = {
+        'total_pago_periodo_centavos': total_pago_periodo,
+        'juros_pagos_periodo_centavos': juros_pagos_periodo,
+        'principal_pago_periodo_centavos': principal_pago_periodo,
+        'credito_recebido_periodo_centavos': credito_recebido_periodo,
+        'total_titulos_centavos': total_titulos,
+        'total_recebido_titulos_centavos': total_recebido_titulos,
+        'total_aberto_centavos': total_aberto,
+        'total_atrasado_centavos': total_atrasado,
+        'quantidade_titulos': len(titulos),
+        'quantidade_movimentos': len(movimentos),
+    }
+
+    return render_template(
+        'portal/extrato.html',
+        contratos=contratos,
+        contrato_id=contrato_id,
+        anos=anos,
+        ano=ano or today.year,
+        situacao=situacao,
+        periodo=periodo,
+        tipo_movimento=tipo_movimento,
+        data_inicio=data_inicio_text,
+        data_fim=data_fim_text,
+        start_date=start_date,
+        end_date=end_date,
+        titulos=titulos,
+        movimentos=movimentos,
+        resumo=resumo,
+    )
+
+
 @bp.get('/portal/comprovantes')
 @portal_required
 def proofs():

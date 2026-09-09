@@ -1,0 +1,381 @@
+{% extends "portal/base.html" %}
+{% block title %}Extrato{% endblock %}
+
+{% block content %}
+<div class="page-header portal-statement-header">
+    <div>
+        <h1>Extrato</h1>
+        <p class="muted">
+            Consulte títulos, pagamentos realizados e movimentações dos seus contratos.
+        </p>
+    </div>
+
+    <div class="actions no-print">
+        <button
+            type="button"
+            class="button button-secondary"
+            onclick="window.print()"
+        >
+            Imprimir / PDF
+        </button>
+
+        <a class="button" href="{{ url_for('portal.new_proof') }}">
+            Enviar comprovante
+        </a>
+    </div>
+</div>
+
+<div class="readonly-portal-notice">
+    <strong>Consulta somente leitura.</strong>
+    <span>
+        Esta tela não altera contratos, títulos ou pagamentos.
+    </span>
+</div>
+
+<section class="card section-card no-print">
+    <form method="get" class="portal-statement-filters" id="portal-statement-filters">
+        <label>
+            Situação dos títulos
+            <select name="situacao">
+                <option value="todos" {{ 'selected' if situacao == 'todos' }}>Todos</option>
+                <option value="abertos" {{ 'selected' if situacao == 'abertos' }}>Em aberto</option>
+                <option value="pendentes" {{ 'selected' if situacao == 'pendentes' }}>Pendentes / a vencer</option>
+                <option value="atrasados" {{ 'selected' if situacao == 'atrasados' }}>Atrasados</option>
+                <option value="pagos" {{ 'selected' if situacao == 'pagos' }}>Pagos</option>
+                <option value="parciais" {{ 'selected' if situacao == 'parciais' }}>Pagos parcialmente</option>
+                <option value="liquidados" {{ 'selected' if situacao == 'liquidados' }}>Contratos liquidados</option>
+            </select>
+        </label>
+
+        <label>
+            Período
+            <select name="periodo" id="portal-period-select">
+                <option value="mes_atual" {{ 'selected' if periodo == 'mes_atual' }}>Mês atual</option>
+                <option value="ano_atual" {{ 'selected' if periodo == 'ano_atual' }}>Ano atual</option>
+                <option value="ano" {{ 'selected' if periodo == 'ano' }}>Escolher ano</option>
+                <option value="personalizado" {{ 'selected' if periodo == 'personalizado' }}>Período personalizado</option>
+                <option value="completo" {{ 'selected' if periodo == 'completo' }}>Histórico completo</option>
+            </select>
+        </label>
+
+        <label>
+            Ano
+            <select name="ano">
+                {% for item in anos %}
+                    <option value="{{ item }}" {{ 'selected' if item == ano }}>
+                        {{ item }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Contrato
+            <select name="contrato_id">
+                <option value="">Todos os contratos</option>
+                {% for contrato in contratos %}
+                    <option
+                        value="{{ contrato['id'] }}"
+                        {{ 'selected' if contrato_id == contrato['id'] }}
+                    >
+                        #{{ contrato['id'] }}
+                        {% if contrato['descricao'] %}
+                            — {{ contrato['descricao'] }}
+                        {% endif %}
+                        — {{ contrato['status'] }}
+                    </option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label>
+            Movimento
+            <select name="tipo_movimento">
+                <option value="TODOS" {{ 'selected' if tipo_movimento == 'TODOS' }}>Todos</option>
+                <option value="JUROS" {{ 'selected' if tipo_movimento == 'JUROS' }}>Juros pagos</option>
+                <option value="ABATIMENTO" {{ 'selected' if tipo_movimento == 'ABATIMENTO' }}>Abatimentos</option>
+                <option value="QUITACAO" {{ 'selected' if tipo_movimento == 'QUITACAO' }}>Quitações</option>
+                <option value="EMPRESTIMO" {{ 'selected' if tipo_movimento == 'EMPRESTIMO' }}>Empréstimos recebidos</option>
+            </select>
+        </label>
+
+        <label>
+            Data inicial
+            <input type="date" name="data_inicio" value="{{ data_inicio }}">
+        </label>
+
+        <label>
+            Data final
+            <input type="date" name="data_fim" value="{{ data_fim }}">
+        </label>
+
+        <div class="portal-statement-filter-actions">
+            <button class="button button-secondary" type="submit">
+                Aplicar filtros
+            </button>
+            <a class="button button-light" href="{{ url_for('portal.statement') }}">
+                Limpar
+            </a>
+        </div>
+    </form>
+
+    <p class="filter-help">
+        A situação é aplicada aos títulos. Período, contrato e tipo de movimento
+        também filtram o histórico financeiro.
+    </p>
+</section>
+
+<section class="portal-statement-identification print-only">
+    <div>
+        <strong>{{ g.portal_access['cliente_nome'] }}</strong>
+        <span>Extrato financeiro</span>
+    </div>
+    <div>
+        {% if start_date or end_date %}
+            {{ start_date|date_br if start_date else 'Início' }}
+            a
+            {{ end_date|date_br if end_date else 'Hoje/futuro' }}
+        {% else %}
+            Histórico completo
+        {% endif %}
+    </div>
+</section>
+
+<div class="metrics-grid portal-statement-metrics">
+    <section class="card metric-card">
+        <span>Total pago no período</span>
+        <strong>{{ resumo['total_pago_periodo_centavos']|money }}</strong>
+        <small>Juros + abatimentos + quitações.</small>
+    </section>
+
+    <section class="card metric-card">
+        <span>Juros pagos</span>
+        <strong>{{ resumo['juros_pagos_periodo_centavos']|money }}</strong>
+        <small>Movimentações de juros no período.</small>
+    </section>
+
+    <section class="card metric-card">
+        <span>Principal pago</span>
+        <strong>{{ resumo['principal_pago_periodo_centavos']|money }}</strong>
+        <small>Abatimentos e quitações.</small>
+    </section>
+
+    <section class="card metric-card metric-card-overdue">
+        <span>Em aberto</span>
+        <strong>{{ resumo['total_aberto_centavos']|money }}</strong>
+        <small>Saldo dos títulos exibidos ainda não pagos.</small>
+    </section>
+
+    <section class="card metric-card metric-card-overdue">
+        <span>Atrasado</span>
+        <strong>{{ resumo['total_atrasado_centavos']|money }}</strong>
+        <small>Saldo vencido dentro dos filtros.</small>
+    </section>
+
+    <section class="card metric-card">
+        <span>Crédito recebido</span>
+        <strong>{{ resumo['credito_recebido_periodo_centavos']|money }}</strong>
+        <small>Novos empréstimos liberados no período.</small>
+    </section>
+</div>
+
+<section class="card section-card portal-statement-section">
+    <div class="section-title-row">
+        <div>
+            <h2>Títulos</h2>
+            <p class="muted section-subtitle">
+                Situação das cobranças conforme os filtros selecionados.
+            </p>
+        </div>
+        <span class="report-count">
+            {{ resumo['quantidade_titulos'] }} título(s)
+        </span>
+    </div>
+
+    {% if titulos %}
+    <div class="table-responsive">
+        <table class="portal-statement-table" data-sortable="true">
+            <thead>
+                <tr>
+                    <th>Vencimento</th>
+                    <th>Contrato</th>
+                    <th>Competência</th>
+                    <th>Documento</th>
+                    <th class="text-right">Valor</th>
+                    <th class="text-right">Recebido</th>
+                    <th class="text-right">Em aberto</th>
+                    <th>Status</th>
+                    <th>Pago em</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for titulo in titulos %}
+                <tr>
+                    <td class="nowrap">
+                        {{ titulo['data_vencimento']|date_br }}
+                    </td>
+
+                    <td>
+                        <strong>#{{ titulo['emprestimo_id'] }}</strong>
+                        {% if titulo['emprestimo_descricao'] %}
+                            <br>
+                            <small>{{ titulo['emprestimo_descricao'] }}</small>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {{ titulo['competencia']|competencia_br }}
+                    </td>
+
+                    <td>
+                        {% if titulo['natureza'] == 'SALDO_JUROS' %}
+                            Saldo de juros
+                            {% if titulo['titulo_origem_id'] %}
+                                <br>
+                                <small>Originado do título #{{ titulo['titulo_origem_id'] }}</small>
+                            {% endif %}
+                        {% else %}
+                            Juros
+                        {% endif %}
+                    </td>
+
+                    <td class="text-right nowrap">
+                        {{ titulo['valor_previsto_centavos']|money }}
+                    </td>
+
+                    <td class="text-right nowrap">
+                        {{ titulo['valor_recebido_centavos']|money }}
+                    </td>
+
+                    <td class="text-right nowrap">
+                        <strong>{{ titulo['saldo_documento_centavos']|money }}</strong>
+                    </td>
+
+                    <td>
+                        <span class="badge badge-{{ titulo['status']|titulo_status|lower }}">
+                            {{ titulo['status']|titulo_status }}
+                        </span>
+                    </td>
+
+                    <td class="nowrap">
+                        {{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            Nenhum título encontrado com os filtros informados.
+        </div>
+    {% endif %}
+</section>
+
+<section class="card section-card portal-statement-section">
+    <div class="section-title-row">
+        <div>
+            <h2>Histórico de movimentações</h2>
+            <p class="muted section-subtitle">
+                Mostra quando os valores foram efetivamente registrados.
+            </p>
+        </div>
+        <span class="report-count">
+            {{ resumo['quantidade_movimentos'] }} movimento(s)
+        </span>
+    </div>
+
+    {% if movimentos %}
+    <div class="table-responsive">
+        <table class="portal-statement-table" data-sortable="true">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Contrato</th>
+                    <th>Movimento</th>
+                    <th>Competência</th>
+                    <th class="text-right">Valor</th>
+                    <th class="text-right">Saldo principal após</th>
+                    <th>Origem</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for mov in movimentos %}
+                <tr>
+                    <td class="nowrap">
+                        {{ mov['data_movimento']|date_br }}
+                    </td>
+
+                    <td>
+                        <strong>#{{ mov['emprestimo_id'] }}</strong>
+                        {% if mov['emprestimo_descricao'] %}
+                            <br>
+                            <small>{{ mov['emprestimo_descricao'] }}</small>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if mov['tipo'] == 'JUROS' %}
+                            Juros pagos
+                        {% elif mov['tipo'] == 'ABATIMENTO' %}
+                            Abatimento do principal
+                        {% elif mov['tipo'] == 'QUITACAO' %}
+                            Quitação
+                        {% elif mov['tipo'] == 'EMPRESTIMO' %}
+                            Empréstimo recebido
+                        {% else %}
+                            {{ mov['tipo'] }}
+                        {% endif %}
+
+                        {% if mov['pagamento_integrado_id'] %}
+                            <br>
+                            <span class="statement-link-badge">
+                                Pagamento conjunto
+                            </span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {{ mov['competencia']|competencia_br if mov['competencia'] else '-' }}
+                    </td>
+
+                    <td class="text-right nowrap">
+                        <strong>{{ mov['valor_centavos']|money }}</strong>
+                    </td>
+
+                    <td class="text-right nowrap">
+                        {% if mov['saldo_depois_centavos'] is not none %}
+                            {{ mov['saldo_depois_centavos']|money }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if mov['comprovante_id'] %}
+                            <span class="badge badge-confirmado">
+                                Comprovante confirmado
+                            </span>
+                        {% elif mov['pagamento_integrado_id'] %}
+                            Pagamento consolidado
+                        {% else %}
+                            Registro financeiro
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+        <div class="empty-state">
+            Nenhuma movimentação encontrada no período.
+        </div>
+    {% endif %}
+</section>
+
+<p class="privacy-report-note">
+    Este extrato mostra exclusivamente informações financeiras do cliente autenticado.
+    Dados administrativos, contas internas e observações privadas não são exibidos.
+</p>
+{% endblock %}
