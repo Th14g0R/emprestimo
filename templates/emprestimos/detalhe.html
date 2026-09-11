@@ -90,7 +90,7 @@
                     <tr>
                         <td>{{ movimento['data_movimento']|date_br }}</td>
                         <td><span class="badge badge-{{ movimento['tipo']|lower }}">{{ movimento['tipo'] }}</span></td>
-                        <td>{{ movimento['competencia']|competencia_br if movimento['tipo'] == 'JUROS' else '-' }}</td>
+                        <td>{{ movimento['competencia']|competencia_br if movimento['tipo'] == 'JUROS' else '-' }}{% set datas = datas_titulo(movimento, true) %}{% if datas %}<br><small>Venc.: {{ datas['data_vencimento']|date_br }}<br>Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}</td>
                         <td class="text-right">{{ movimento['valor_centavos']|money }}</td>
                         <td class="text-right">{{ movimento['saldo_antes_centavos']|money if movimento['saldo_antes_centavos'] is not none else '-' }}</td>
                         <td class="text-right">{{ movimento['saldo_depois_centavos']|money if movimento['saldo_depois_centavos'] is not none else '-' }}</td>

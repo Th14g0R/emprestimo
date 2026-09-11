@@ -219,7 +219,7 @@
                             <br><small>{{ titulo['emprestimo_descricao'] }}</small>
                         {% endif %}
                     </td>
-                    <td>{{ titulo['competencia']|competencia_br }}</td>
+                    <td>{{ titulo['competencia']|competencia_br }}{% set datas = datas_titulo(titulo) %}{% if datas %}<br><small>Venc.: {{ datas['data_vencimento']|date_br }}<br>Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}</td>
                     <td>
                         {% if titulo['natureza'] == 'SALDO_JUROS' %}
                             Saldo de juros

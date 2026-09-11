@@ -2,6 +2,16 @@
 
 Este documento é normativo para o projeto.
 
+## Reagendamento de vencimentos
+
+- Alterações em lote atingem somente títulos de juros em aberto e preservam a competência.
+- O acréscimo opcional de transição usa juros mensais sobre o saldo-base × dias corridos de adiamento / 30, com Decimal e arredondamento HALF_UP ao centavo no final.
+- O acréscimo integra o valor do primeiro título selecionado de cada empréstimo; não cria outro movimento JUROS nem altera o principal. Os demais títulos mantêm o valor.
+- A base comercial de 30 dias é uma convenção explícita do reagendamento, não uma determinação de taxa legal. Usar quando combinada entre as partes.
+- A prévia deve ser confirmada com senha do usuário atual e motivo. O lote é atômico e auditado. Recebidos, cancelados e saldos parciais não podem ser reagendados por esse fluxo.
+- Manter o novo dia mensal requer selecionar os títulos futuros em aberto já gerados. O novo dia também passa a valer para a geração posterior.
+- Estornar um recebimento reutiliza a correção auditada: reabre o título, limpa a baixa e conserva o registro financeiro anterior na auditoria. Recebimentos posteriores de saldos precisam ser desfeitos primeiro. Pagamentos integrados são desfeitos como um conjunto, com confirmação explícita na tela correspondente.
+
 ## 1. Independência dos empréstimos
 
 Um cliente pode possuir vários empréstimos simultâneos. Cada contrato mantém saldo, taxa, movimentos e status próprios.

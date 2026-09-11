@@ -2080,3 +2080,18 @@ tbody tr:hover {
         border: 1px solid #aaa;
     }
 }
+
+/* Seleção e reagendamento de títulos */
+.receivable-bulk-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:16px; padding:16px 20px; border-bottom:1px solid var(--border, #dbe3ef); }
+.receivable-check { display:flex !important; align-items:center; gap:9px; margin:0; cursor:pointer; }
+.receivable-check input[type="checkbox"], .receivable-selection input[type="checkbox"] { width:18px; height:18px; min-height:18px; padding:0; margin:0; flex:0 0 18px; accent-color:#3154ce; vertical-align:middle; }
+.receivable-selection { width:76px; text-align:center; vertical-align:middle; }
+.receivable-reschedule .form-actions { display:flex; flex-wrap:wrap; justify-content:flex-start; gap:10px; }
+.receivable-reschedule .form-actions .button { width:auto; }
+.receivable-reschedule button:disabled { opacity:.5; cursor:not-allowed; }
+.filters-receivables { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+.filters-receivables select[name="emprestimo_id"] { min-width:0; max-width:100%; }
+@media (max-width: 640px) { .filters-receivables select[name="emprestimo_id"] { max-width:100%; } }
+
+@media (max-width:1200px) { .filters-receivables { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:720px) { .filters-receivables { grid-template-columns:1fr; } }

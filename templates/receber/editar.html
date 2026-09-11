@@ -10,6 +10,11 @@
 </div>
 
 <section class="card section-card">
+    <form method="post" action="{{ url_for('titulos_receber_lote') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="titulo_id" value="{{ titulo['id'] }}">
+        <button class="button button-secondary">Reagendar com ajuste proporcional de juros</button>
+    </form>
     <form method="post" class="form-grid form-grid-2">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

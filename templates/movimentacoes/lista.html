@@ -67,7 +67,7 @@
             <td class="movement-type">
                 <span class="badge badge-{{ mov['tipo']|lower }}">{{ mov['tipo'] }}</span>
                 {% if mov['tipo'] == 'JUROS' %}
-                    <div class="movement-subline">{{ mov['competencia']|competencia_br }}</div>
+                    <div class="movement-subline">{{ mov['competencia']|competencia_br }}{% set datas = datas_titulo(mov, true) %}{% if datas %}<br><small>Venc.: {{ datas['data_vencimento']|date_br }}<br>Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}</div>
                 {% endif %}
             </td>
 

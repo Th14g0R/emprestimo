@@ -48,7 +48,7 @@
         {% for item in itens %}
             <tr>
                 <td><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=item['emprestimo_id']) }}">#{{ item['emprestimo_id'] }}</a></td>
-                <td>{{ item['competencia']|competencia_br }}</td>
+                <td>{{ item['competencia']|competencia_br }}{% set datas = datas_titulo(item) %}{% if datas %}<br><small>Venc.: {{ datas['data_vencimento']|date_br }}<br>Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}</td>
                 <td>
                     {% if item['titulo_receber_id'] %}
                         <a href="{{ url_for('titulos_receber_detalhe', titulo_id=item['titulo_receber_id']) }}">

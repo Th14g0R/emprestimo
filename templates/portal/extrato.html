@@ -336,7 +336,7 @@
                     </td>
 
                     <td>
-                        {{ mov['competencia']|competencia_br if mov['competencia'] else '-' }}
+                        {{ mov['competencia']|competencia_br if mov['competencia'] else '-' }}{% set datas = datas_titulo(mov, true) %}{% if datas %}<br><small>Venc.: {{ datas['data_vencimento']|date_br }}<br>Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}
                     </td>
 
                     <td class="text-right nowrap">

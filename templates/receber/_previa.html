@@ -1,0 +1,3 @@
+{% if plano %}<div class="table-responsive"><table><thead><tr><th>Título / Cliente</th><th>Competência</th><th>Vencimento anterior</th><th>Novo vencimento</th><th>Pagamento</th><th>Valor anterior</th><th>Adicional</th><th>Novo valor</th></tr></thead><tbody>
+{% for item in plano %}<tr><td>#{{ item.titulo.id }} · {{ item.titulo.cliente_nome }}</td><td>{{ item.titulo.competencia|competencia_br }}</td><td>{{ item.titulo.data_vencimento|date_br }}</td><td>{{ item.nova_data|date_br }}</td><td>{{ item.titulo.data_recebimento|date_br if item.titulo.data_recebimento else '-' }}</td><td>{{ item.titulo.valor_previsto_centavos|money }}</td><td>{{ item.adicional|money }}</td><td>{{ item.valor|money }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}

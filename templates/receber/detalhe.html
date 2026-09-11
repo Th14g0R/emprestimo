@@ -10,6 +10,7 @@
         </p>
     </div>
     <div class="actions wrap-actions">
+        {% if titulo['status'] in ['RECEBIDO', 'PARCIAL'] %}<a class="button button-danger" href="{{ url_for('titulos_receber_estornar', titulo_id=titulo['id']) }}">Estornar recebimento</a>{% endif %}
         {% if titulo['status'] in ['PREVISTO', 'VENCIDO'] %}
             <a class="button button-secondary" href="{{ url_for('pagamentos_integrados_novo', cliente_id=titulo['cliente_id']) }}">Usar em pagamento integrado</a>
             <a class="button button-light" href="{{ url_for('titulos_receber_editar', titulo_id=titulo['id']) }}">Alterar</a>
@@ -45,9 +46,7 @@
         <dt>Recebido neste documento</dt><dd><strong>{{ titulo['valor_recebido_centavos']|money }}</strong></dd>
         {% endif %}
 
-        {% if titulo['data_recebimento'] %}
-        <dt>Recebido em</dt><dd>{{ titulo['data_recebimento']|date_br }}</dd>
-        {% endif %}
+        <dt>Pagamento</dt><dd>{{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}</dd>
 
         {% if titulo['movimentacao_id'] %}
         <dt>Movimentação</dt>
@@ -71,7 +70,7 @@
         <h3>Documentos de saldo gerados</h3>
         {% for saldo in titulos_saldo %}
             <a class="related-title-card" href="{{ url_for('titulos_receber_detalhe', titulo_id=saldo['id']) }}">
-                <span>#{{ saldo['id'] }} · sequência {{ saldo['sequencia'] }}</span>
+                <span>#{{ saldo['id'] }} · sequência {{ saldo['sequencia'] }}</span>{% set datas = datas_titulo(saldo) %}{% if datas %}<small>Competência: {{ datas['competencia']|competencia_br }} · Vencimento: {{ datas['data_vencimento']|date_br }} · Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}
                 <strong>{{ saldo['valor_previsto_centavos']|money }}</strong>
                 <span class="badge badge-{{ saldo['status']|titulo_status|lower }}">{{ saldo['status']|titulo_status }}</span>
             </a>

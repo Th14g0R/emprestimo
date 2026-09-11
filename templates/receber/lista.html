@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}A Receber{% endblock %}
+{% block title %}A Receber
+{% endblock %}
 {% block content %}
 <div class="page-header">
     <div>
@@ -38,6 +39,10 @@
     <form class="filters filters-receivables" method="get">
         <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, empréstimo, competência ou observação">
 
+        <select name="emprestimo_id" aria-label="Filtrar por empréstimo">
+            <option value="">Todos os empréstimos</option>
+            {% for e in emprestimos_filtro %}<option value="{{ e.id }}" {{ 'selected' if emprestimo_filtro == e.id }}>#{{ e.id }} · {{ e.cliente_nome }}{% if e.descricao %} · {{ e.descricao }}{% endif %}</option>{% endfor %}
+        </select>
         <select name="status">
             <option value="abertos" {{ 'selected' if status == 'abertos' }}>Em aberto</option>
             <option value="previsto" {{ 'selected' if status == 'previsto' }}>Pendentes</option>
@@ -76,11 +81,16 @@
 
 <section class="card table-card">
 {% if titulos %}
+<form method="post" action="{{ url_for('titulos_receber_lote') }}" id="lote" class="receivable-bulk-toolbar">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="button" type="submit">Alterar vencimentos dos selecionados</button>
+<label class="receivable-check"><input type="checkbox" id="selecionar-todos"> Selecionar todos em aberto</label>
+</form>
 <div class="table-responsive">
 <table class="receivables-table" data-sortable="true">
     <thead>
         <tr>
-            <th>Vencimento</th>
+            <th class="receivable-selection">Selecionar</th><th>Vencimento</th>
             <th>Cliente / Empréstimo</th>
             <th>Competência</th>
             <th>Documento</th>
@@ -94,6 +104,7 @@
     <tbody>
     {% for titulo in titulos %}
         <tr>
+            <td class="receivable-selection">{% if titulo['status'] in ['PREVISTO', 'VENCIDO'] and titulo['natureza'] == 'JUROS' %}<input type="checkbox" form="lote" name="titulo_id" value="{{ titulo['id'] }}" aria-label="Selecionar título {{ titulo['id'] }}">{% endif %}</td>
             <td class="nowrap">{{ titulo['data_vencimento']|date_br }}</td>
             <td>
                 <a href="{{ url_for('clientes_detalhe', cliente_id=titulo['cliente_id']) }}">{{ titulo['cliente_nome'] }}</a>
@@ -127,6 +138,7 @@
                         {{ 'Receber' if titulo['status'] in ['PREVISTO', 'VENCIDO'] else 'Abrir' }}
                     </a>
 
+                    {% if titulo['status'] in ['RECEBIDO', 'PARCIAL'] %}<a class="button button-danger button-small" href="{{ url_for('titulos_receber_estornar', titulo_id=titulo['id']) }}">Estornar</a>{% endif %}
                     {% if titulo['status'] in ['PREVISTO', 'VENCIDO'] %}
                         <a class="button button-light button-small" href="{{ url_for('titulos_receber_editar', titulo_id=titulo['id']) }}">Alterar</a>
                         <a class="button button-danger button-small" href="{{ url_for('titulos_receber_excluir', titulo_id=titulo['id']) }}">Excluir</a>
@@ -143,4 +155,5 @@
 <div class="empty-state">Nenhum título encontrado para os filtros informados.</div>
 {% endif %}
 </section>
+<script>document.getElementById('selecionar-todos')?.addEventListener('change', function () { document.querySelectorAll('input[name="titulo_id"]').forEach(c => c.checked = this.checked); });</script>
 {% endblock %}

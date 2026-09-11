@@ -1,0 +1,24 @@
+{% extends 'base.html' %}
+{% block title %}Reagendar títulos{% endblock %}
+{% block content %}
+<h1>Reagendar {{ ids|length }} título(s)</h1>
+<section class="card section-card">
+<p>A competência permanece a mesma. Altere para uma data única ou para um dia mensal, preservando o mês de cada vencimento. Dias 29–31 são limitados ao último dia do mês.</p>
+<form method="post" class="form-grid form-grid-2 receivable-reschedule" id="reagendamento">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% for id in ids %}<input type="hidden" name="titulo_id" value="{{ id }}">{% endfor %}
+<label>Data única para os selecionados<input type="date" name="nova_data" value="{{ request.form.get('nova_data', '') }}"></label>
+<label>OU dia mensal<input type="number" min="1" max="31" name="dia" value="{{ request.form.get('dia', '') }}"></label>
+<label class="receivable-check field-span-2"><input type="checkbox" name="proporcional" value="1" {{ 'checked' if request.form.get('proporcional') }}> Acrescentar juros proporcionais no primeiro título selecionado de cada empréstimo</label>
+<p class="field-span-2">Adicional = juros mensais sobre o saldo-base × dias de adiamento ÷ 30, arredondado ao centavo somente no final. O adicional entra uma única vez no título de transição. Não altera o principal. Exemplo: R$ 400 + R$ 133,33 por 10 dias = R$ 533,33.</p>
+<label class="receivable-check field-span-2"><input type="checkbox" name="futuros" value="1" {{ 'checked' if request.form.get('futuros') }}> Manter o dia mensal para novos títulos (selecione também todos os futuros já gerados)</label>
+<div class="form-actions field-span-2"><button class="button button-secondary" name="acao" value="prever">Calcular prévia</button><a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Voltar à agenda</a></div>
+<p class="field-span-2 muted" id="previa-status" role="status">A prévia será atualizada ao editar a data ou o dia mensal.</p>
+<div id="previa-titulos" class="field-span-2">{% include 'receber/_previa.html' %}</div>
+<input type="hidden" name="assinatura" value="{{ assinatura }}">
+<label>Motivo<input name="motivo" minlength="5" value="{{ request.form.get('motivo', '') }}"></label>
+<label>Confirme sua senha<input type="password" name="senha_confirmacao" autocomplete="current-password"></label>
+<div class="form-actions field-span-2"><button class="button" name="acao" value="salvar" id="confirmar-previa" {{ 'disabled' if not plano }}>Confirmar alterações da prévia</button></div>
+</form></section>
+<script src="{{ url_for('static', filename='js/reagendamento.js') }}" defer></script>
+{% endblock %}

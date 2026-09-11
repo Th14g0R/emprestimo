@@ -800,7 +800,28 @@ def register_context_processors(app: Flask) -> None:
     def inject_helpers() -> dict[str, Any]:
         return {
             "csrf_token": get_csrf_token,
+            "datas_titulo": datas_titulo,
         }
+
+
+def datas_titulo(registro, movimento=False):
+    """Resolve datas do documento vinculado, com cache apenas desta requisição."""
+    r = dict(registro)
+    if movimento:
+        if r.get("tipo") != "JUROS":
+            return None
+        mid = r.get("movimentacao_id") or r.get("id")
+        key = ("mov", mid)
+        sql, param = "SELECT * FROM titulos_receber WHERE movimentacao_id=?", mid
+    else:
+        tid = r.get("titulo_receber_id") if "titulo_receber_id" in r else r.get("id")
+        key = ("titulo", tid)
+        sql, param = "SELECT * FROM titulos_receber WHERE id=?", tid
+    if not hasattr(g, "datas_titulos_cache"):
+        g.datas_titulos_cache = {}
+    if key not in g.datas_titulos_cache:
+        g.datas_titulos_cache[key] = get_db().execute(sql, (param,)).fetchone()
+    return g.datas_titulos_cache[key]
 
 
 def register_template_filters(app: Flask) -> None:
@@ -4533,6 +4554,9 @@ def register_routes(app: Flask) -> None:
             else:
                 db = get_db()
                 before = movimentacao_para_auditoria(movimento)
+                before["titulos_vinculados"] = [dict(t) for t in db.execute(
+                    "SELECT * FROM titulos_receber WHERE movimentacao_id=? OR titulo_origem_id=?",
+                    (movimentacao_id, movimento["titulo_receber_id"])).fetchall()]
                 try:
                     if movimento["tipo"] == "JUROS" and movimento["titulo_receber_id"] is not None:
                         titulo_id = int(movimento["titulo_receber_id"])
@@ -5001,6 +5025,14 @@ def register_routes(app: Flask) -> None:
                 ]
             )
 
+        emprestimo_filtro = parse_int(request.args.get("emprestimo_id"))
+        if emprestimo_filtro is not None:
+            sql += " AND e.id = ?"
+            params.append(emprestimo_filtro)
+        emprestimos_filtro = db.execute("""SELECT e.id, e.descricao, c.nome AS cliente_nome
+            FROM emprestimos e JOIN clientes c ON c.id=e.cliente_id
+            ORDER BY c.nome COLLATE NOCASE, e.id""").fetchall()
+
         if termo:
             like = f"%{termo}%"
             sql += """
@@ -5039,6 +5071,8 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "receber/lista.html",
             titulos=titulos,
+            emprestimo_filtro=emprestimo_filtro,
+            emprestimos_filtro=emprestimos_filtro,
             status=status,
             periodo_key=periodo_key,
             termo=termo,
@@ -5402,6 +5436,8 @@ def register_routes(app: Flask) -> None:
                         titulo["natureza"] != "SALDO_JUROS"
                         and valor_previsto is not None
                         and valor_previsto != juros_esperado
+                        and not (titulo["ajuste_manual"] and competencia == titulo["competencia"]
+                                 and valor_previsto == titulo["valor_previsto_centavos"])
                     ):
                         errors.append(
                             "O juro continua sendo integral. Para o saldo-base "
@@ -5539,6 +5575,93 @@ def register_routes(app: Flask) -> None:
             titulo=titulo,
             form=form,
         )
+
+    @app.get("/receber/<int:titulo_id>/estornar")
+    @login_required
+    def titulos_receber_estornar(titulo_id):
+        titulo = get_titulo_receber_or_404(titulo_id)
+        if titulo["status"] not in {"RECEBIDO", "PARCIAL"} or not titulo["movimentacao_id"]:
+            flash("Este título não possui recebimento para estornar.", "warning")
+            return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
+        mov = get_movimentacao_or_404(titulo["movimentacao_id"])
+        if mov["pagamento_integrado_id"]:
+            flash("Este recebimento integra um pagamento. Confira todos os itens: a confirmação desfaz o pagamento integrado inteiro.", "warning")
+            return redirect(url_for("pagamentos_integrados_excluir", pagamento_id=mov["pagamento_integrado_id"]))
+        return redirect(url_for("movimentacoes_excluir", movimentacao_id=mov["id"]))
+
+    @app.post("/receber/alterar-lote")
+    @login_required
+    def titulos_receber_lote():
+        from reagendamento import planejar
+        db = get_db()
+        plano = []
+        erro = None
+        automatica = request.headers.get("X-Receivable-Preview") == "1"
+        ids = sorted(set(request.form.getlist("titulo_id")))
+        try:
+            if automatica and request.form.get("acao") != "prever":
+                raise ValueError("A prévia automática não permite salvar alterações.")
+            if not ids or len(ids) > 500 or any(not i.isdigit() for i in ids):
+                raise ValueError("Selecione entre 1 e 500 títulos válidos.")
+            db.execute("BEGIN IMMEDIATE")
+            titulos = [get_titulo_receber_or_404(int(i)) for i in ids]
+            if request.form.get("acao") in {"prever", "salvar"}:
+                nova_data = parse_iso_date(request.form.get("nova_data"))
+                dia = parse_int(request.form.get("dia"))
+                plano = planejar(titulos, nova_data=nova_data, dia=dia,
+                                 proporcional=request.form.get("proporcional") == "1")
+                if request.form.get("futuros") == "1" and not dia:
+                    raise ValueError("Para manter o dia nos próximos títulos, informe o dia mensal.")
+                if request.form.get("acao") == "salvar":
+                    if not validar_senha_usuario_atual(request.form.get("senha_confirmacao", "")):
+                        raise ValueError("A senha do usuário logado é inválida.")
+                    motivo = request.form.get("motivo", "").strip()
+                    if len(motivo) < 5:
+                        raise ValueError("Informe um motivo com pelo menos 5 caracteres.")
+                    # Confirmação vinculada à prévia: alterações concorrentes exigem nova revisão.
+                    from hashlib import sha256
+                    assinatura = sha256(json.dumps(plano, sort_keys=True).encode()).hexdigest()
+                    if request.form.get("assinatura") != assinatura:
+                        raise ValueError("Os títulos mudaram desde a prévia. Revise e confirme novamente.")
+                    for item in plano:
+                        t = item["titulo"]
+                        db.execute("""UPDATE titulos_receber SET data_vencimento=?,
+                            valor_previsto_centavos=?, status=?, ajuste_manual=1,
+                            updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                            (item["nova_data"], item["valor"], status_aberto_por_vencimento(item["nova_data"]), t["id"]))
+                        depois = db.execute("SELECT * FROM titulos_receber WHERE id=?", (t["id"],)).fetchone()
+                        registrar_auditoria(db, "titulo_receber", t["id"], "REAGENDADO",
+                            json.dumps(dict(motivo=motivo, antes=titulo_receber_para_auditoria(t),
+                                depois=titulo_receber_para_auditoria(depois), dias=item["dias"],
+                                adicional_centavos=item["adicional"], base_dias=30), ensure_ascii=False))
+                    if request.form.get("futuros") == "1":
+                        for eid in {t["emprestimo_id"] for t in titulos}:
+                            antes = db.execute("SELECT dia_vencimento FROM emprestimos WHERE id=?", (eid,)).fetchone()[0]
+                            # Inclui os títulos futuros já gerados na confirmação, evitando agendas divergentes.
+                            limite = min(t["data_vencimento"] for t in titulos if t["emprestimo_id"] == eid)
+                            faltantes = db.execute("""SELECT id FROM titulos_receber WHERE emprestimo_id=?
+                                AND data_vencimento>=? AND status IN ('PREVISTO','VENCIDO')""", (eid, limite)).fetchall()
+                            if any(str(t["id"]) not in ids for t in faltantes):
+                                raise ValueError("Para manter o novo dia, selecione também todos os títulos futuros em aberto do empréstimo.")
+                            db.execute("UPDATE emprestimos SET dia_vencimento=? WHERE id=?", (dia, eid))
+                            registrar_auditoria(db, "emprestimo", eid, "VENCIMENTO_ALTERADO",
+                                json.dumps(dict(motivo=motivo, antes=antes, depois=dia)))
+                    db.commit()
+                    flash("Vencimentos alterados e ajuste de juros registrado na auditoria.", "success")
+                    return redirect(url_for("titulos_receber_lista"))
+            db.rollback()
+        except (ValueError, sqlite3.DatabaseError) as exc:
+            db.rollback()
+            erro = str(exc)
+            plano = []
+            if not automatica:
+                flash(erro, "danger")
+        from hashlib import sha256
+        assinatura = sha256(json.dumps(plano, sort_keys=True).encode()).hexdigest()
+        if automatica:
+            return {"html": render_template("receber/_previa.html", plano=plano),
+                    "assinatura": assinatura if plano else "", "erro": erro}
+        return render_template("receber/lote.html", ids=ids, plano=plano, assinatura=assinatura)
 
     @app.route("/receber/<int:titulo_id>/excluir", methods=["GET", "POST"])
     @login_required
