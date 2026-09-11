@@ -23,6 +23,24 @@ python app.py
 
 Acesse `http://127.0.0.1:5000`.
 
+## Atualização manual no Windows
+
+Pare a aplicação antes de atualizar e faça backup de `data/` (incluindo banco,
+chave de sessão e comprovantes). No ambiente virtual usado pela aplicação:
+
+```bat
+git pull --ff-only
+python -m pip install -r requirements.txt
+python -m pip check
+python -m unittest discover -s tests
+python app.py
+```
+
+Use o mesmo interpretador para instalar as dependências e iniciar o sistema.
+`git reset --hard` descarta alterações locais e não instala dependências.
+Para instalações como serviço, prefira a atualização pelo gerenciador Windows.
+Os testes usam bancos temporários, sem acessar o banco de produção.
+
 ## Produção no Windows
 
 Use `Gerenciar-Emprestimo.bat`. O gerenciador pode:

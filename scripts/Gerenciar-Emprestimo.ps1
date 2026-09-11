@@ -778,7 +778,7 @@ function Install-PythonRequirements {
     }
 
     # Validação objetiva das dependências necessárias ao serviço.
-    & $venvPython -c 'import flask,waitress,openpyxl,reportlab'
+    & $venvPython -c 'import flask,waitress,openpyxl,reportlab; from PIL import Image, ImageOps'
 
     if ($LASTEXITCODE -ne 0) {
         throw 'O ambiente virtual foi criado, mas uma ou mais dependências Python não podem ser importadas.'

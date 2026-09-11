@@ -7437,7 +7437,11 @@ def get_emprestimo_or_404(emprestimo_id: int) -> sqlite3.Row:
     return emprestimo
 
 
-app = create_app()
+if __name__ == "__main__":
+    # O portal importa helpers de app; inicialize apenas no módulo canônico.
+    from app import app
+else:
+    app = create_app()
 
 
 if __name__ == "__main__":
