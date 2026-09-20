@@ -123,3 +123,21 @@ class ManagerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'ocupada'):
                 self.manager.port_free()
             self.assertGreater(sock.fileno(), 0)
+
+    def test_stop_waits_for_owned_process_before_returning(self):
+        with patch.object(self.manager, 'guard_plist'), patch.object(self.manager, 'service_loaded', return_value=True), \
+             patch('scripts.gerenciar_macos.run') as run, \
+             patch('scripts.gerenciar_macos.os.kill', side_effect=[None, ProcessLookupError]) as probe, \
+             patch('scripts.gerenciar_macos.time.sleep'):
+            run.return_value.stdout = '    pid = 12345\n'
+            self.manager.stop()
+            self.assertEqual(probe.call_count, 2)
+            self.assertTrue(all(call.args == (12345, 0) for call in probe.call_args_list))
+
+    def test_stop_timeout_prevents_continuing_with_live_process(self):
+        with patch.object(self.manager, 'guard_plist'), patch.object(self.manager, 'service_loaded', return_value=True), \
+             patch('scripts.gerenciar_macos.run') as run, \
+             patch('scripts.gerenciar_macos.os.kill'), patch('scripts.gerenciar_macos.time.sleep'):
+            run.return_value.stdout = '    pid = 12345\n'
+            with self.assertRaisesRegex(ValueError, 'ainda não encerrou'):
+                self.manager.stop()

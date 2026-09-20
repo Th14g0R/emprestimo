@@ -178,11 +178,26 @@ class Manager:
     def stop(self):
         self.guard_plist()
         if self.service_loaded():
+            details = run('launchctl', 'print', f'{self.domain}/{LABEL}', capture=True).stdout
+            match = re.search(r'^\s*pid = (\d+)\s*$', details, re.MULTILINE)
+            pid = int(match.group(1)) if match else None
             run('launchctl', 'bootout', f'{self.domain}/{LABEL}')
+            if pid:
+                for _ in range(100):
+                    try:
+                        os.kill(pid, 0)  # Apenas consulta; não encerra processos.
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.1)
+                else:
+                    raise ValueError('O processo anterior ainda não encerrou. Aguarde antes de copiar dados ou reiniciar.')
         print('Serviço descarregado. Não mantenha outra instância manual usando os mesmos dados.')
 
     def port_free(self):
         with socket.socket() as sock:
+            # Igual ao listener do Waitress: TIME_WAIT após uma parada normal
+            # não deve ser confundido com outro servidor escutando nesta porta.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 sock.bind(('127.0.0.1', self.port))
             except OSError:
