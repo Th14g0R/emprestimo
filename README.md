@@ -15,26 +15,41 @@ nem usuário ou senha padrão.
 - Cartões, dashboard, relatórios, comprovantes privados e auditoria.
 - CSRF, senhas com hash, limites de tentativas e transações financeiras atômicas.
 
-## Instalação no Windows
+## Instalação: escolha seu sistema
 
-Baixe a branch `release/v2` e execute **Gerenciar-Emprestimo.bat**. O gerenciador
-instala o serviço **Emprestimo**, com Waitress e SQLite, e acompanha somente essa
-branch. Para atualizar uma instalação anterior, use o gerenciador desta versão.
+| Sistema | Guia completo | Como executar |
+| --- | --- | --- |
+| Windows | [Instalar no Windows](docs/DEPLOYMENT_WINDOWS.md) | Gerenciador `.bat` ou Waitress manual; serviço Windows |
+| macOS | [Instalar no Mac](docs/DEPLOYMENT_MACOS.md) | Terminal; início automático opcional ao fazer login |
+| Linux | [Instalar no Linux](docs/DEPLOYMENT_LINUX.md) | Terminal; serviço systemd opcional |
 
-Veja [instalação e atualização](docs/DEPLOYMENT_WINDOWS.md), incluindo backup,
-restauração e configuração de rede. O fluxo de serviço requer Windows; os testes
-Python também podem ser executados em outros sistemas.
+O [guia geral](docs/INSTALACAO.md) explica dados, backup, atualização, restauração
+e acesso pela rede. Todos os sistemas usam o mesmo código com Waitress e SQLite.
+O gerenciador `.bat` é exclusivo do Windows.
 
-Para executar manualmente, em uma pasta de instalação:
+### Início rápido no macOS/Linux
 
-```bat
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.lock
-.venv\Scripts\waitress-serve.exe --listen=127.0.0.1:5000 --threads=4 wsgi:application
+Com Git e Python 3.10+ instalados, em uma pasta onde deseja guardar o sistema:
+
+```sh
+git clone --branch release/v2 --single-branch https://github.com/Th14g0R/emprestimo.git emprestimo-v2
+cd emprestimo-v2
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.lock
+.venv/bin/waitress-serve --listen=127.0.0.1:5000 --threads=4 wsgi:application
 ```
 
-Abra `http://127.0.0.1:5000` para criar o primeiro administrador. Faça essa
-configuração localmente antes de disponibilizar o acesso a outros usuários.
+No Mac, se o Python instalado responde por `python3.14`, use esse comando no
+lugar de `python3`. Abra **http://127.0.0.1:5000** no mesmo computador e crie o
+administrador. Mantenha o Terminal aberto; Control + C para parar. Para executar
+sem Terminal, siga a configuração automática do guia do seu sistema.
+
+### Início no Windows
+
+Baixe a branch `release/v2` e execute **Gerenciar-Emprestimo.bat**. Ele instala o
+serviço **Emprestimo** e acompanha essa branch. Para atualizar uma instalação
+anterior, use o gerenciador desta versão. O [guia Windows](docs/DEPLOYMENT_WINDOWS.md)
+também explica a instalação manual e os pré-requisitos.
 
 ## Dados e atualização
 
@@ -44,8 +59,16 @@ comprovantes, backups e ambientes Python não fazem parte da publicação.
 
 Antes de restaurar um banco antigo, valide uma cópia:
 
+Windows:
+
 ```bat
 .venv\Scripts\python.exe scripts\verificar_banco.py C:\backup\emprestimos.db
+```
+
+macOS/Linux:
+
+```sh
+.venv/bin/python scripts/verificar_banco.py /caminho/do/backup/emprestimos.db
 ```
 
 Veja [compatibilidade e juros de atraso](docs/JUROS_ATRASO_E_RESTAURACAO.md).

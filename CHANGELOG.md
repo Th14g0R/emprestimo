@@ -1,5 +1,11 @@
 # Changelog
 
+## Documentação multiplataforma — 2026-09-19
+
+- Guias de instalação, execução automática, atualização e diagnóstico para
+  Windows, macOS e Linux na branch release/v2.
+- Nenhuma alteração de versão da aplicação, regra financeira ou esquema.
+
 ## 2.0.0+build.1 — 2026-09-19
 
 - Publicação da versão 2 na branch release/v2, sem dados demonstrativos.
