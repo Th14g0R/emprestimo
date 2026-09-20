@@ -5,6 +5,13 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
+
+from database import get_db, close_db, init_db, migrate_schema
+from security import register_public_limits
+from painel import dashboard_data
+from money import parse_money_to_centavos
+from transactions import register_atomic_writes, serialized_update
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -27,7 +34,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "25.0-client-statement-filters"
+APP_VERSION = "2.0.0+build.1"
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -122,6 +129,8 @@ def create_app() -> Flask:
 
     from portal import register_portal
     register_portal(app)
+    register_public_limits(app, get_db)
+    register_atomic_writes(app, get_db, refresh=sync_receivable_titles)
 
     return app
 
@@ -136,575 +145,6 @@ def load_or_create_secret_key() -> str:
     key = secrets.token_hex(32)
     SECRET_KEY_PATH.write_text(key, encoding="utf-8")
     return key
-
-
-def current_database_path() -> str:
-    from flask import current_app
-
-    return current_app.config["DATABASE"]
-
-
-def get_db() -> sqlite3.Connection:
-    if "db" not in g:
-        connection = sqlite3.connect(
-            current_database_path(),
-            timeout=10,
-        )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON;")
-        connection.execute("PRAGMA journal_mode = WAL;")
-        connection.execute("PRAGMA busy_timeout = 5000;")
-        g.db = connection
-
-    return g.db
-
-
-def close_db(error: BaseException | None = None) -> None:
-    connection = g.pop("db", None)
-    if connection is not None:
-        connection.close()
-
-
-def init_db() -> None:
-    """Cria o schema caso ainda não exista. Não apaga dados existentes."""
-    db = get_db()
-
-    db.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            login TEXT NOT NULL UNIQUE,
-            senha_hash TEXT NOT NULL,
-            ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS clientes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
-            telefone TEXT,
-            email TEXT,
-            cpf TEXT,
-            endereco TEXT,
-            cidade TEXT,
-            estado TEXT,
-            cep TEXT,
-            observacoes TEXT,
-            ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        );
-
-        CREATE TABLE IF NOT EXISTS contas_bancarias (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tipo_titular TEXT NOT NULL CHECK (tipo_titular IN ('NOSSA', 'CLIENTE')),
-            cliente_id INTEGER,
-            banco TEXT NOT NULL,
-            descricao TEXT,
-            agencia TEXT,
-            conta TEXT,
-            tipo_conta TEXT,
-            chave_pix TEXT,
-            principal INTEGER NOT NULL DEFAULT 0 CHECK (principal IN (0, 1)),
-            ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            CHECK (
-                (tipo_titular = 'NOSSA' AND cliente_id IS NULL)
-                OR
-                (tipo_titular = 'CLIENTE' AND cliente_id IS NOT NULL)
-            ),
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT
-        );
-
-        CREATE TABLE IF NOT EXISTS emprestimos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id INTEGER NOT NULL,
-            descricao TEXT,
-            data_emprestimo TEXT NOT NULL,
-            valor_original_centavos INTEGER NOT NULL CHECK (valor_original_centavos > 0),
-            saldo_atual_centavos INTEGER NOT NULL CHECK (saldo_atual_centavos >= 0),
-            taxa_juros_mensal REAL NOT NULL CHECK (taxa_juros_mensal >= 0),
-            data_primeiro_vencimento TEXT,
-            dia_vencimento INTEGER CHECK (dia_vencimento IS NULL OR dia_vencimento BETWEEN 1 AND 31),
-            status TEXT NOT NULL DEFAULT 'ATIVO' CHECK (status IN ('ATIVO', 'QUITADO', 'VENCIDO')),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT
-        );
-
-        CREATE TABLE IF NOT EXISTS movimentacoes_emprestimo (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            emprestimo_id INTEGER NOT NULL,
-            tipo TEXT NOT NULL CHECK (tipo IN ('EMPRESTIMO', 'JUROS', 'ABATIMENTO', 'QUITACAO')),
-            data_movimento TEXT NOT NULL,
-            valor_centavos INTEGER NOT NULL CHECK (valor_centavos >= 0),
-            conta_origem_id INTEGER,
-            conta_destino_id INTEGER,
-            origem_banco_snapshot TEXT,
-            origem_pix_snapshot TEXT,
-            destino_banco_snapshot TEXT,
-            destino_pix_snapshot TEXT,
-            observacao TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (emprestimo_id) REFERENCES emprestimos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (conta_origem_id) REFERENCES contas_bancarias(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (conta_destino_id) REFERENCES contas_bancarias(id) ON UPDATE CASCADE ON DELETE RESTRICT
-        );
-
-        CREATE TABLE IF NOT EXISTS titulos_receber (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            emprestimo_id INTEGER NOT NULL,
-            tipo TEXT NOT NULL DEFAULT 'JUROS' CHECK (tipo IN ('JUROS')),
-            competencia TEXT NOT NULL,
-            data_vencimento TEXT NOT NULL,
-            valor_previsto_centavos INTEGER NOT NULL CHECK (valor_previsto_centavos >= 0),
-            valor_recebido_centavos INTEGER NOT NULL DEFAULT 0 CHECK (valor_recebido_centavos >= 0),
-            saldo_base_centavos INTEGER NOT NULL CHECK (saldo_base_centavos >= 0),
-            taxa_juros_mensal REAL NOT NULL CHECK (taxa_juros_mensal >= 0),
-            status TEXT NOT NULL DEFAULT 'PREVISTO'
-                CHECK (status IN ('PREVISTO', 'VENCIDO', 'PARCIAL', 'RECEBIDO', 'CANCELADO')),
-            movimentacao_id INTEGER,
-            data_recebimento TEXT,
-            observacao TEXT,
-            ajuste_manual INTEGER NOT NULL DEFAULT 0
-                CHECK (ajuste_manual IN (0, 1)),
-            titulo_origem_id INTEGER,
-            natureza TEXT NOT NULL DEFAULT 'JUROS'
-                CHECK (natureza IN ('JUROS', 'SALDO_JUROS')),
-            sequencia INTEGER NOT NULL DEFAULT 1 CHECK (sequencia >= 1),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (emprestimo_id) REFERENCES emprestimos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (movimentacao_id) REFERENCES movimentacoes_emprestimo(id) ON UPDATE CASCADE ON DELETE SET NULL,
-            FOREIGN KEY (titulo_origem_id) REFERENCES titulos_receber(id) ON UPDATE CASCADE ON DELETE RESTRICT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_titulos_receber_vencimento ON titulos_receber(data_vencimento);
-        CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status);
-        CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id);
-        CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia);
-
-        CREATE TABLE IF NOT EXISTS pagamentos_integrados (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id INTEGER NOT NULL,
-            data_pagamento TEXT NOT NULL,
-            valor_total_centavos INTEGER NOT NULL
-                CHECK (valor_total_centavos > 0),
-            conta_origem_id INTEGER NOT NULL,
-            conta_destino_id INTEGER NOT NULL,
-            origem_banco_snapshot TEXT,
-            origem_pix_snapshot TEXT,
-            destino_banco_snapshot TEXT,
-            destino_pix_snapshot TEXT,
-            observacao TEXT,
-            usuario_id INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (cliente_id)
-                REFERENCES clientes(id)
-                ON UPDATE CASCADE
-                ON DELETE RESTRICT,
-            FOREIGN KEY (conta_origem_id)
-                REFERENCES contas_bancarias(id)
-                ON UPDATE CASCADE
-                ON DELETE RESTRICT,
-            FOREIGN KEY (conta_destino_id)
-                REFERENCES contas_bancarias(id)
-                ON UPDATE CASCADE
-                ON DELETE RESTRICT,
-            FOREIGN KEY (usuario_id)
-                REFERENCES usuarios(id)
-                ON UPDATE CASCADE
-                ON DELETE SET NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS pagamentos_integrados_itens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pagamento_integrado_id INTEGER NOT NULL,
-            emprestimo_id INTEGER NOT NULL,
-            tipo TEXT NOT NULL DEFAULT 'JUROS'
-                CHECK (tipo IN ('JUROS')),
-            competencia TEXT NOT NULL,
-            valor_centavos INTEGER NOT NULL
-                CHECK (valor_centavos > 0),
-            saldo_base_centavos INTEGER NOT NULL
-                CHECK (saldo_base_centavos >= 0),
-            movimentacao_id INTEGER NOT NULL UNIQUE,
-            titulo_receber_id INTEGER,
-            origem_item TEXT NOT NULL DEFAULT 'MANUAL'
-                CHECK (origem_item IN ('MANUAL', 'TITULO')),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (pagamento_integrado_id)
-                REFERENCES pagamentos_integrados(id)
-                ON UPDATE CASCADE
-                ON DELETE CASCADE,
-            FOREIGN KEY (emprestimo_id)
-                REFERENCES emprestimos(id)
-                ON UPDATE CASCADE
-                ON DELETE RESTRICT,
-            FOREIGN KEY (movimentacao_id)
-                REFERENCES movimentacoes_emprestimo(id)
-                ON UPDATE CASCADE
-                ON DELETE RESTRICT,
-            FOREIGN KEY (titulo_receber_id)
-                REFERENCES titulos_receber(id)
-                ON UPDATE CASCADE
-                ON DELETE SET NULL,
-            UNIQUE (pagamento_integrado_id, emprestimo_id, competencia)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_cliente
-            ON pagamentos_integrados(cliente_id);
-
-        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_data
-            ON pagamentos_integrados(data_pagamento);
-
-        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_itens_pagamento
-            ON pagamentos_integrados_itens(pagamento_integrado_id);
-
-        CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_itens_emprestimo
-            ON pagamentos_integrados_itens(emprestimo_id);
-
-        CREATE TABLE IF NOT EXISTS cartoes_credito (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id INTEGER NOT NULL,
-            descricao TEXT NOT NULL,
-            ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON UPDATE CASCADE ON DELETE RESTRICT
-        );
-
-        CREATE TABLE IF NOT EXISTS lancamentos_cartao (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cartao_credito_id INTEGER NOT NULL,
-            descricao TEXT NOT NULL,
-            valor_total_centavos INTEGER NOT NULL CHECK (valor_total_centavos > 0),
-            quantidade_parcelas INTEGER NOT NULL CHECK (quantidade_parcelas > 0),
-            data_compra TEXT NOT NULL,
-            usuario_id INTEGER,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (cartao_credito_id) REFERENCES cartoes_credito(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS parcelas_cartao (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            lancamento_cartao_id INTEGER NOT NULL,
-            numero_parcela INTEGER NOT NULL CHECK (numero_parcela > 0),
-            valor_centavos INTEGER NOT NULL CHECK (valor_centavos >= 0),
-            vencimento TEXT NOT NULL,
-            data_pagamento TEXT,
-            conta_origem_id INTEGER,
-            conta_destino_id INTEGER,
-            origem_banco_snapshot TEXT,
-            origem_pix_snapshot TEXT,
-            destino_banco_snapshot TEXT,
-            destino_pix_snapshot TEXT,
-            usuario_pagamento_id INTEGER,
-            pagamento_observacao TEXT,
-            status TEXT NOT NULL DEFAULT 'PENDENTE' CHECK (status IN ('PENDENTE', 'PAGO', 'VENCIDO', 'CANCELADO')),
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (lancamento_cartao_id) REFERENCES lancamentos_cartao(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (conta_origem_id) REFERENCES contas_bancarias(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (conta_destino_id) REFERENCES contas_bancarias(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-            FOREIGN KEY (usuario_pagamento_id) REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL,
-            UNIQUE (lancamento_cartao_id, numero_parcela)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_clientes_nome ON clientes(nome);
-        CREATE INDEX IF NOT EXISTS idx_clientes_cpf ON clientes(cpf);
-        CREATE INDEX IF NOT EXISTS idx_contas_cliente ON contas_bancarias(cliente_id);
-        CREATE INDEX IF NOT EXISTS idx_contas_tipo_ativo ON contas_bancarias(tipo_titular, ativo);
-        CREATE INDEX IF NOT EXISTS idx_emprestimos_cliente ON emprestimos(cliente_id);
-        CREATE INDEX IF NOT EXISTS idx_emprestimos_status ON emprestimos(status);
-        CREATE INDEX IF NOT EXISTS idx_emprestimos_data ON emprestimos(data_emprestimo);
-        CREATE INDEX IF NOT EXISTS idx_movimentacoes_emprestimo ON movimentacoes_emprestimo(emprestimo_id);
-        CREATE INDEX IF NOT EXISTS idx_movimentacoes_data ON movimentacoes_emprestimo(data_movimento);
-        CREATE INDEX IF NOT EXISTS idx_cartoes_cliente ON cartoes_credito(cliente_id);
-        CREATE INDEX IF NOT EXISTS idx_lancamentos_cartao ON lancamentos_cartao(cartao_credito_id);
-        CREATE INDEX IF NOT EXISTS idx_parcelas_vencimento ON parcelas_cartao(vencimento);
-        CREATE INDEX IF NOT EXISTS idx_parcelas_status ON parcelas_cartao(status);
-
-        CREATE TABLE IF NOT EXISTS auditoria (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            usuario_id INTEGER,
-            entidade TEXT NOT NULL,
-            entidade_id INTEGER,
-            acao TEXT NOT NULL,
-            detalhes TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON UPDATE CASCADE ON DELETE SET NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_auditoria_entidade
-            ON auditoria(entidade, entidade_id);
-
-        CREATE INDEX IF NOT EXISTS idx_auditoria_created_at
-            ON auditoria(created_at);
-        """
-    )
-
-    migrate_schema(db)
-    db.commit()
-
-
-def table_columns(db: sqlite3.Connection, table_name: str) -> set[str]:
-    return {row["name"] for row in db.execute(f"PRAGMA table_info({table_name})").fetchall()}
-
-
-def add_column_if_missing(
-    db: sqlite3.Connection,
-    table_name: str,
-    column_name: str,
-    column_definition: str,
-) -> None:
-    if column_name not in table_columns(db, table_name):
-        db.execute(
-            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
-        )
-
-
-def migrate_titulos_receber_v16(db: sqlite3.Connection) -> None:
-    """
-    V16: permite vários documentos de juros da mesma competência.
-
-    Isto é necessário para recebimentos parciais: o documento original fica
-    marcado como PARCIAL e é criado um novo documento SALDO_JUROS, relacionado
-    ao anterior, com o valor que ainda falta receber.
-
-    A tabela antiga possuía UNIQUE (emprestimo_id, tipo, competencia) e o CHECK
-    de status não aceitava PARCIAL; por isso esta migração precisa reconstruir
-    a tabela preservando os IDs e os dados existentes.
-    """
-    row = db.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'titulos_receber'"
-    ).fetchone()
-    if row is None:
-        return
-
-    columns = table_columns(db, "titulos_receber")
-    table_sql = (row["sql"] or "").upper()
-    needs_rebuild = (
-        "titulo_origem_id" not in columns
-        or "valor_recebido_centavos" not in columns
-        or "natureza" not in columns
-        or "sequencia" not in columns
-        or "PARCIAL" not in table_sql
-        or "UNIQUE (EMPRESTIMO_ID, TIPO, COMPETENCIA)" in table_sql
-    )
-    if not needs_rebuild:
-        return
-
-    db.commit()
-    foreign_keys_enabled = int(db.execute("PRAGMA foreign_keys").fetchone()[0])
-    db.execute("PRAGMA foreign_keys = OFF")
-
-    try:
-        db.execute("BEGIN")
-        db.execute("DROP TABLE IF EXISTS titulos_receber_v16")
-        db.execute(
-            """
-            CREATE TABLE titulos_receber_v16 (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                emprestimo_id INTEGER NOT NULL,
-                tipo TEXT NOT NULL DEFAULT 'JUROS' CHECK (tipo IN ('JUROS')),
-                competencia TEXT NOT NULL,
-                data_vencimento TEXT NOT NULL,
-                valor_previsto_centavos INTEGER NOT NULL CHECK (valor_previsto_centavos >= 0),
-                valor_recebido_centavos INTEGER NOT NULL DEFAULT 0 CHECK (valor_recebido_centavos >= 0),
-                saldo_base_centavos INTEGER NOT NULL CHECK (saldo_base_centavos >= 0),
-                taxa_juros_mensal REAL NOT NULL CHECK (taxa_juros_mensal >= 0),
-                status TEXT NOT NULL DEFAULT 'PREVISTO'
-                    CHECK (status IN ('PREVISTO', 'VENCIDO', 'PARCIAL', 'RECEBIDO', 'CANCELADO')),
-                movimentacao_id INTEGER,
-                data_recebimento TEXT,
-                observacao TEXT,
-                ajuste_manual INTEGER NOT NULL DEFAULT 0 CHECK (ajuste_manual IN (0, 1)),
-                titulo_origem_id INTEGER,
-                natureza TEXT NOT NULL DEFAULT 'JUROS'
-                    CHECK (natureza IN ('JUROS', 'SALDO_JUROS')),
-                sequencia INTEGER NOT NULL DEFAULT 1 CHECK (sequencia >= 1),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (emprestimo_id) REFERENCES emprestimos(id) ON UPDATE CASCADE ON DELETE RESTRICT,
-                FOREIGN KEY (movimentacao_id) REFERENCES movimentacoes_emprestimo(id) ON UPDATE CASCADE ON DELETE SET NULL,
-                FOREIGN KEY (titulo_origem_id) REFERENCES titulos_receber_v16(id) ON UPDATE CASCADE ON DELETE RESTRICT
-            )
-            """
-        )
-
-        ajuste_expr = "ajuste_manual" if "ajuste_manual" in columns else "0"
-        recebido_expr = (
-            "valor_recebido_centavos"
-            if "valor_recebido_centavos" in columns
-            else "CASE WHEN status = 'RECEBIDO' THEN valor_previsto_centavos ELSE 0 END"
-        )
-        origem_expr = "titulo_origem_id" if "titulo_origem_id" in columns else "NULL"
-        natureza_expr = "natureza" if "natureza" in columns else "'JUROS'"
-        sequencia_expr = "sequencia" if "sequencia" in columns else "1"
-
-        db.execute(
-            f"""
-            INSERT INTO titulos_receber_v16 (
-                id, emprestimo_id, tipo, competencia, data_vencimento,
-                valor_previsto_centavos, valor_recebido_centavos,
-                saldo_base_centavos, taxa_juros_mensal, status,
-                movimentacao_id, data_recebimento, observacao, ajuste_manual,
-                titulo_origem_id, natureza, sequencia, created_at, updated_at
-            )
-            SELECT
-                id, emprestimo_id, tipo, competencia, data_vencimento,
-                valor_previsto_centavos, {recebido_expr},
-                saldo_base_centavos, taxa_juros_mensal, status,
-                movimentacao_id, data_recebimento, observacao, {ajuste_expr},
-                {origem_expr}, {natureza_expr}, {sequencia_expr}, created_at, updated_at
-              FROM titulos_receber
-            """
-        )
-
-        db.execute("DROP TABLE titulos_receber")
-        db.execute("ALTER TABLE titulos_receber_v16 RENAME TO titulos_receber")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_vencimento ON titulos_receber(data_vencimento)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia)")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_titulos_receber_origem ON titulos_receber(titulo_origem_id)")
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.execute(f"PRAGMA foreign_keys = {1 if foreign_keys_enabled else 0}")
-
-
-def migrate_schema(db: sqlite3.Connection) -> None:
-    """Aplica pequenas evoluções de schema sem apagar o banco existente."""
-    migrate_titulos_receber_v16(db)
-    add_column_if_missing(db, "movimentacoes_emprestimo", "competencia", "TEXT")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "usuario_id", "INTEGER")
-    add_column_if_missing(
-        db,
-        "movimentacoes_emprestimo",
-        "saldo_antes_centavos",
-        "INTEGER",
-    )
-    add_column_if_missing(
-        db,
-        "movimentacoes_emprestimo",
-        "saldo_depois_centavos",
-        "INTEGER",
-    )
-
-    add_column_if_missing(db, "movimentacoes_emprestimo", "conta_origem_id", "INTEGER")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "conta_destino_id", "INTEGER")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "origem_banco_snapshot", "TEXT")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "origem_pix_snapshot", "TEXT")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "destino_banco_snapshot", "TEXT")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "destino_pix_snapshot", "TEXT")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "updated_at", "TEXT")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "usuario_ultima_alteracao_id", "INTEGER")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "pagamento_integrado_id", "INTEGER")
-    add_column_if_missing(db, "movimentacoes_emprestimo", "titulo_receber_id", "INTEGER")
-    add_column_if_missing(db, "titulos_receber", "ajuste_manual", "INTEGER NOT NULL DEFAULT 0")
-    add_column_if_missing(db, "titulos_receber", "valor_recebido_centavos", "INTEGER NOT NULL DEFAULT 0")
-    add_column_if_missing(db, "titulos_receber", "titulo_origem_id", "INTEGER")
-    add_column_if_missing(db, "titulos_receber", "natureza", "TEXT NOT NULL DEFAULT 'JUROS'")
-    add_column_if_missing(db, "titulos_receber", "sequencia", "INTEGER NOT NULL DEFAULT 1")
-    add_column_if_missing(db, "pagamentos_integrados_itens", "titulo_receber_id", "INTEGER")
-    add_column_if_missing(
-        db,
-        "pagamentos_integrados_itens",
-        "origem_item",
-        "TEXT NOT NULL DEFAULT 'MANUAL'",
-    )
-    add_column_if_missing(db, "usuarios", "tentativas_falhas", "INTEGER NOT NULL DEFAULT 0")
-    add_column_if_missing(db, "usuarios", "bloqueado_ate", "TEXT")
-    add_column_if_missing(db, "cartoes_credito", "dia_vencimento", "INTEGER")
-    add_column_if_missing(db, "lancamentos_cartao", "usuario_id", "INTEGER")
-    add_column_if_missing(db, "parcelas_cartao", "conta_origem_id", "INTEGER")
-    add_column_if_missing(db, "parcelas_cartao", "conta_destino_id", "INTEGER")
-    add_column_if_missing(db, "parcelas_cartao", "origem_banco_snapshot", "TEXT")
-    add_column_if_missing(db, "parcelas_cartao", "origem_pix_snapshot", "TEXT")
-    add_column_if_missing(db, "parcelas_cartao", "destino_banco_snapshot", "TEXT")
-    add_column_if_missing(db, "parcelas_cartao", "destino_pix_snapshot", "TEXT")
-    add_column_if_missing(db, "parcelas_cartao", "usuario_pagamento_id", "INTEGER")
-    add_column_if_missing(db, "parcelas_cartao", "pagamento_observacao", "TEXT")
-
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_movimentacoes_pagamento_integrado ON movimentacoes_emprestimo(pagamento_integrado_id)"
-    )
-
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_pagamentos_integrados_itens_titulo ON pagamentos_integrados_itens(titulo_receber_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_titulos_receber_origem ON titulos_receber(titulo_origem_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia)"
-    )
-
-
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_movimentacoes_conta_origem ON movimentacoes_emprestimo(conta_origem_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_movimentacoes_conta_destino ON movimentacoes_emprestimo(conta_destino_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_parcelas_conta_origem ON parcelas_cartao(conta_origem_id)"
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_parcelas_conta_destino ON parcelas_cartao(conta_destino_id)"
-    )
-
-    # Até a V15 existia um índice UNIQUE por empréstimo/competência.
-    # Recebimentos parciais precisam permitir várias movimentações JUROS para
-    # a mesma competência, cada uma vinculada ao documento que foi baixado.
-    db.execute("DROP INDEX IF EXISTS uq_juros_emprestimo_competencia")
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_juros_emprestimo_competencia
-            ON movimentacoes_emprestimo(emprestimo_id, competencia)
-         WHERE tipo = 'JUROS'
-           AND competencia IS NOT NULL
-        """
-    )
-    db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_movimentacoes_titulo_receber "
-        "ON movimentacoes_emprestimo(titulo_receber_id)"
-    )
-
-    # Retrocompatibilidade: vincula movimentos antigos aos títulos que já
-    # armazenavam movimentacao_id.
-    db.execute(
-        """
-        UPDATE movimentacoes_emprestimo
-           SET titulo_receber_id = (
-               SELECT t.id
-                 FROM titulos_receber t
-                WHERE t.movimentacao_id = movimentacoes_emprestimo.id
-                LIMIT 1
-           )
-         WHERE titulo_receber_id IS NULL
-           AND EXISTS (
-               SELECT 1
-                 FROM titulos_receber t
-                WHERE t.movimentacao_id = movimentacoes_emprestimo.id
-           )
-        """
-    )
-
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_movimentacoes_tipo_competencia
-            ON movimentacoes_emprestimo(tipo, competencia)
-        """
-    )
 
 
 def registrar_auditoria(
@@ -801,6 +241,8 @@ def register_context_processors(app: Flask) -> None:
         return {
             "csrf_token": get_csrf_token,
             "datas_titulo": datas_titulo,
+            "hoje": date.today(),
+            "app_version": APP_VERSION,
         }
 
 
@@ -875,39 +317,6 @@ def parse_iso_date(value: str | None) -> date | None:
         return date.fromisoformat(clean)
     except ValueError:
         return None
-
-
-def parse_money_to_centavos(value: str | None) -> int | None:
-    """Converte valores como 1234,56 / 1.234,56 / 1234.56 em centavos."""
-    raw = (value or "").strip().replace("R$", "").replace(" ", "")
-    if not raw:
-        return None
-
-    raw = re.sub(r"[^0-9,.-]", "", raw)
-
-    if "," in raw and "." in raw:
-        # Entrada no padrão brasileiro: 1.234,56
-        raw = raw.replace(".", "").replace(",", ".")
-    elif "," in raw:
-        raw = raw.replace(".", "").replace(",", ".")
-    elif raw.count(".") > 1:
-        raw = raw.replace(".", "")
-    elif raw.count(".") == 1:
-        integer_part, decimal_part = raw.split(".")
-        if len(decimal_part) == 3 and integer_part not in {"0", "-0"}:
-            # Interpreta 1.234 como mil duzentos e trinta e quatro.
-            raw = integer_part + decimal_part
-
-    try:
-        amount = Decimal(raw)
-    except InvalidOperation:
-        return None
-
-    if not amount.is_finite():
-        return None
-
-    amount = amount.quantize(DUAS_CASAS, rounding=ROUND_HALF_UP)
-    return int(amount * CENTAVOS)
 
 
 def parse_percent(value: str | None) -> Decimal | None:
@@ -1130,6 +539,7 @@ def receivable_period_summary(
     }
 
 
+@serialized_update
 def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> None:
     """
     Sincroniza somente previsões automáticas.
@@ -1147,21 +557,32 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
         SELECT id, emprestimo_id, competencia, data_vencimento, status,
                movimentacao_id, ajuste_manual, titulo_origem_id, natureza
           FROM titulos_receber
-         WHERE tipo = 'JUROS'
+         WHERE tipo = 'JUROS' AND status IN ('PREVISTO', 'VENCIDO')
         """
     ).fetchall()
 
+    # Carrega apenas movimentos associados a competências ainda abertas.
+    # Evita uma consulta por título e não traz todo o histórico para a memória.
+    movements_by_period = {}
+    for movement in db.execute("""
+        SELECT m.id, m.emprestimo_id, m.competencia,
+               m.data_movimento, m.titulo_receber_id
+          FROM (
+              SELECT DISTINCT emprestimo_id, competencia FROM titulos_receber
+               WHERE tipo = 'JUROS' AND status IN ('PREVISTO', 'VENCIDO')
+                 AND COALESCE(ajuste_manual, 0) = 0
+                 AND titulo_origem_id IS NULL AND natureza != 'SALDO_JUROS'
+          ) pending
+          JOIN movimentacoes_emprestimo m
+            ON m.emprestimo_id = pending.emprestimo_id
+           AND m.competencia = pending.competencia AND m.tipo = 'JUROS'
+         ORDER BY m.id
+    """):
+        key = (movement["emprestimo_id"], movement["competencia"])
+        movements_by_period.setdefault(key, []).append(dict(movement))
+
     for titulo in existing_titles:
         due = date.fromisoformat(titulo["data_vencimento"])
-
-        if titulo["status"] in {"CANCELADO", "PARCIAL"}:
-            continue
-
-        if titulo["status"] == "RECEBIDO":
-            # Um título recebido permanece histórico. Se a movimentação foi
-            # excluída por uma operação de correção, a rotina de exclusão é
-            # responsável por reabrir o documento correspondente.
-            continue
 
         expected_status = "VENCIDO" if due < today else "PREVISTO"
 
@@ -1181,17 +602,9 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
 
         # Compatibilidade com lançamentos antigos: só vincula automaticamente
         # quando há exatamente uma movimentação sem título para a competência.
-        movements = db.execute(
-            """
-            SELECT id, data_movimento, titulo_receber_id
-              FROM movimentacoes_emprestimo
-             WHERE emprestimo_id = ?
-               AND tipo = 'JUROS'
-               AND competencia = ?
-             ORDER BY id
-            """,
-            (titulo["emprestimo_id"], titulo["competencia"]),
-        ).fetchall()
+        movements = movements_by_period.get(
+            (titulo["emprestimo_id"], titulo["competencia"]), []
+        )
 
         linked = next(
             (m for m in movements if m["titulo_receber_id"] == titulo["id"]),
@@ -1218,6 +631,7 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
                     "UPDATE movimentacoes_emprestimo SET titulo_receber_id = ? WHERE id = ?",
                     (titulo["id"], linked["id"]),
                 )
+                linked["titulo_receber_id"] = titulo["id"]
             continue
 
         if titulo["status"] != expected_status:
@@ -1236,6 +650,24 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
            AND taxa_juros_mensal > 0
         """
     ).fetchall()
+
+    # A projeção cobre apenas o mês corrente e os meses solicitados.
+    first_period = competencia_date(current_month)
+    last_period = competencia_date(add_months_iso(current_month, months_ahead))
+    projected_titles = {}
+    for title in db.execute("""
+        SELECT id, emprestimo_id, competencia, status, data_vencimento,
+               ajuste_manual, titulo_origem_id, natureza, valor_previsto_centavos,
+               saldo_base_centavos, taxa_juros_mensal
+          FROM titulos_receber
+         WHERE tipo = 'JUROS' AND competencia BETWEEN ? AND ?
+         ORDER BY sequencia, id
+    """, (first_period, last_period)):
+        projected_titles[(title["emprestimo_id"], title["competencia"])] = title
+    paid_periods = set(tuple(row) for row in db.execute("""
+        SELECT DISTINCT emprestimo_id, competencia FROM movimentacoes_emprestimo
+         WHERE tipo = 'JUROS' AND competencia BETWEEN ? AND ?
+    """, (first_period, last_period)))
 
     for emprestimo in loans:
         loan_date = date.fromisoformat(emprestimo["data_emprestimo"])
@@ -1259,34 +691,10 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
 
             # Qualquer documento já existente para esta competência (inclusive
             # CANCELADO/PARCIAL/SALDO) impede a recriação automática.
-            titulo = db.execute(
-                """
-                SELECT id, status, data_vencimento, ajuste_manual,
-                       titulo_origem_id, natureza
-                  FROM titulos_receber
-                 WHERE emprestimo_id = ?
-                   AND tipo = 'JUROS'
-                   AND competencia = ?
-                 ORDER BY sequencia DESC, id DESC
-                 LIMIT 1
-                """,
-                (emprestimo["id"], competencia),
-            ).fetchone()
+            key = (emprestimo["id"], competencia)
+            titulo = projected_titles.get(key)
 
-            movements_count = int(
-                db.execute(
-                    """
-                    SELECT COUNT(*) AS qtd
-                      FROM movimentacoes_emprestimo
-                     WHERE emprestimo_id = ?
-                       AND tipo = 'JUROS'
-                       AND competencia = ?
-                    """,
-                    (emprestimo["id"], competencia),
-                ).fetchone()["qtd"]
-            )
-
-            if titulo is None and movements_count > 0:
+            if titulo is None and key in paid_periods:
                 # Lançamento histórico/manual já realizado sem título.
                 continue
 
@@ -1320,6 +728,12 @@ def sync_receivable_titles(db: sqlite3.Connection, months_ahead: int = 2) -> Non
                 and titulo["titulo_origem_id"] is None
                 and titulo["natureza"] == "JUROS"
                 and date.fromisoformat(titulo["data_vencimento"]) >= today
+                and (
+                    titulo["data_vencimento"] != due.isoformat()
+                    or titulo["valor_previsto_centavos"] != amount
+                    or titulo["saldo_base_centavos"] != emprestimo["saldo_atual_centavos"]
+                    or titulo["taxa_juros_mensal"] != emprestimo["taxa_juros_mensal"]
+                )
             ):
                 db.execute(
                     """
@@ -1524,6 +938,8 @@ def titulo_receber_para_auditoria(
     row: sqlite3.Row | dict[str, Any],
 ) -> dict[str, Any]:
     keys = (
+        "valor_base_centavos", "data_base_atraso", "dias_atraso",
+        "juros_atraso_centavos", "data_calculo_atraso",
         "id",
         "emprestimo_id",
         "tipo",
@@ -1613,8 +1029,8 @@ def aplicar_recebimento_titulo(
     observacao: str | None = None,
 ) -> int | None:
     """
-    Baixa integralmente um título ou o marca como PARCIAL e cria o documento
-    residual. Retorna o id do novo saldo quando houver pagamento parcial.
+    Baixa integralmente um título. Registros parciais legados são preservados,
+    mas novos recebimentos parciais não são permitidos.
     """
     titulo = db.execute(
         "SELECT * FROM titulos_receber WHERE id = ?",
@@ -1628,9 +1044,9 @@ def aplicar_recebimento_titulo(
     valor_documento = int(titulo["valor_previsto_centavos"])
     if valor_recebido_centavos <= 0:
         raise ValueError("O valor recebido deve ser maior que zero.")
-    if valor_recebido_centavos > valor_documento:
+    if valor_recebido_centavos != valor_documento:
         raise ValueError(
-            f"O recebimento não pode ser maior que {format_money(valor_documento)}."
+            f"Os juros devem ser recebidos integralmente: {format_money(valor_documento)}."
         )
 
     if valor_recebido_centavos == valor_documento:
@@ -1654,38 +1070,6 @@ def aplicar_recebimento_titulo(
             ),
         )
         return None
-
-    saldo = valor_documento - valor_recebido_centavos
-    db.execute(
-        """
-        UPDATE titulos_receber
-           SET status = 'PARCIAL',
-               valor_recebido_centavos = ?,
-               movimentacao_id = ?,
-               data_recebimento = ?,
-               observacao = COALESCE(?, observacao),
-               ajuste_manual = 1,
-               updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?
-        """,
-        (
-            valor_recebido_centavos,
-            movimentacao_id,
-            data_recebimento.isoformat(),
-            normalize_optional(observacao),
-            titulo_id,
-        ),
-    )
-
-    return criar_titulo_saldo_juros(
-        db,
-        titulo_id,
-        saldo,
-        observacao=(
-            f"Saldo de {format_money(saldo)} originado do título #{titulo_id}. "
-            f"Recebido parcialmente: {format_money(valor_recebido_centavos)}."
-        ),
-    )
 
 
 def criar_titulo_manual_parcial(
@@ -1795,6 +1179,8 @@ def validar_senha_usuario_atual(senha: str | None) -> bool:
 
 def movimentacao_para_auditoria(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     keys = (
+        "valor_base_centavos", "data_base_atraso", "dias_atraso",
+        "juros_atraso_centavos", "data_calculo_atraso",
         "id",
         "emprestimo_id",
         "tipo",
@@ -1835,7 +1221,8 @@ def recalcular_emprestimo_por_movimentacoes(
 
     movimentos = db.execute(
         """
-        SELECT id, tipo, data_movimento, valor_centavos, competencia
+        SELECT id, tipo, data_movimento, valor_centavos, competencia,
+               valor_base_centavos, juros_atraso_centavos, dias_atraso, data_base_atraso, data_calculo_atraso
           FROM movimentacoes_emprestimo
          WHERE emprestimo_id = ?
          ORDER BY data_movimento, id
@@ -1884,17 +1271,19 @@ def recalcular_emprestimo_por_movimentacoes(
         saldo_antes = saldo
 
         if tipo == "JUROS":
-            valor_esperado = calcular_juros_centavos(
-                saldo,
-                emprestimo["taxa_juros_mensal"],
-            )
+            if movimento["valor_base_centavos"] is not None:
+                from atrasos import calcular
+                esperado = calcular(dict(emprestimo_id=emprestimo_id,
+                    valor_base_centavos=movimento["valor_base_centavos"],
+                    valor_previsto_centavos=movimento["valor_base_centavos"],
+                    data_vencimento=movimento["data_base_atraso"]),
+                    date.fromisoformat(movimento["data_movimento"]))
+                valor_esperado = esperado["valor_total_centavos"]
+            else:
+                valor_esperado = calcular_juros_centavos(saldo,emprestimo["taxa_juros_mensal"])
             if valor != valor_esperado:
-                raise ValueError(
-                    "A correção deixaria os juros "
-                    f"#{movimento_id} inconsistentes: registrado "
-                    f"{format_money(valor)}, esperado {format_money(valor_esperado)} "
-                    "para o saldo existente naquela data."
-                )
+                raise ValueError("A correção deixaria os juros registrados inconsistentes. "
+                                 "Estorne o recebimento e confira uma nova prévia.")
             saldo_depois = saldo
 
         elif tipo == "ABATIMENTO":
@@ -1955,6 +1344,7 @@ def recalcular_emprestimo_por_movimentacoes(
     return saldo
 
 
+@serialized_update
 def refresh_overdue_card_installments(db: sqlite3.Connection) -> None:
     db.execute(
         """
@@ -1985,9 +1375,23 @@ def register_routes(app: Flask) -> None:
         return {
             "status": "ok",
             "database": "ok",
-            "database_file": str(DATABASE_PATH),
             "version": APP_VERSION,
         }
+
+    @app.post("/agenda/atualizar")
+    @login_required
+    def atualizar_agenda():
+        sync_receivable_titles(get_db())
+        flash("Agenda de recebimentos atualizada.", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.get("/auditoria")
+    @login_required
+    def auditoria_lista():
+        eventos = get_db().execute("""SELECT a.*, u.nome AS usuario_nome
+            FROM auditoria a LEFT JOIN usuarios u ON u.id=a.usuario_id
+            ORDER BY a.id DESC LIMIT 200""").fetchall()
+        return render_template("auditoria.html", eventos=eventos)
 
     @app.get("/debug/tabelas")
     @login_required
@@ -2153,7 +1557,6 @@ def register_routes(app: Flask) -> None:
     @login_required
     def dashboard():
         db = get_db()
-        sync_receivable_titles(db)
         mes_atual = date.today().strftime("%Y-%m")
 
         metrics = db.execute(
@@ -2213,7 +1616,8 @@ def register_routes(app: Flask) -> None:
         proximos_titulos = db.execute(
             """
             SELECT t.id, t.competencia, t.data_vencimento,
-                   t.valor_previsto_centavos, t.status, t.natureza,
+                   t.valor_previsto_centavos,
+                   CASE WHEN t.data_vencimento < date('now','localtime') THEN 'VENCIDO' ELSE 'PREVISTO' END AS status, t.natureza,
                    t.titulo_origem_id,
                    e.id AS emprestimo_id, c.nome AS cliente_nome
               FROM titulos_receber t
@@ -2229,6 +1633,7 @@ def register_routes(app: Flask) -> None:
         return render_template(
             "dashboard.html",
             metrics=metrics,
+            painel=dashboard_data(db),
             ultimos_emprestimos=ultimos_emprestimos,
             ultimas_movimentacoes=ultimas_movimentacoes,
             mes_atual=mes_atual,
@@ -2383,8 +1788,13 @@ def register_routes(app: Flask) -> None:
 
         sql += " ORDER BY nome COLLATE NOCASE"
 
-        clientes = get_db().execute(sql, params).fetchall()
-        return render_template("clientes/lista.html", clientes=clientes, termo=termo, status=status)
+        db = get_db()
+        total = db.execute("SELECT COUNT(*) FROM (" + sql + ")", params).fetchone()[0]
+        pagina = max(1, parse_int(request.args.get("pagina")) or 1)
+        pagina = min(pagina, max(1, (total + 49) // 50))
+        clientes = db.execute(sql + " LIMIT 50 OFFSET ?", [*params, (pagina - 1) * 50]).fetchall()
+        return render_template("clientes/lista.html", clientes=clientes, termo=termo,
+                               status=status, total=total, pagina=pagina)
 
     @app.route("/clientes/novo", methods=["GET", "POST"])
     @login_required
@@ -2820,7 +2230,9 @@ def register_routes(app: Flask) -> None:
             "quitados": "QUITADO",
             "vencidos": "VENCIDO",
         }
-        if status in status_map:
+        if status == "ativos":
+            sql += " AND e.status IN ('ATIVO','VENCIDO')"
+        elif status in status_map:
             sql += " AND e.status = ?"
             params.append(status_map[status])
 
@@ -3091,131 +2503,9 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/emprestimos/<int:emprestimo_id>/juros", methods=["GET", "POST"])
     @login_required
-    def emprestimos_juros(emprestimo_id: int):
-        emprestimo = get_emprestimo_or_404(emprestimo_id)
-        contas_cliente = get_client_accounts(emprestimo["cliente_id"])
-        contas_proprias = get_own_accounts()
-
-        if emprestimo["status"] == "QUITADO" or emprestimo["saldo_atual_centavos"] <= 0:
-            flash("Este empréstimo já está quitado e não aceita novos juros.", "warning")
-            return redirect(url_for("emprestimos_detalhe", emprestimo_id=emprestimo_id))
-
-        juros_centavos = calcular_juros_centavos(
-            emprestimo["saldo_atual_centavos"],
-            emprestimo["taxa_juros_mensal"],
-        )
-
-        if juros_centavos <= 0:
-            flash("A taxa atual não gera valor de juros para este saldo.", "warning")
-            return redirect(url_for("emprestimos_detalhe", emprestimo_id=emprestimo_id))
-
-        form = {
-            "data_movimento": request.form.get("data_movimento", date.today().isoformat()),
-            "competencia": request.form.get("competencia", date.today().strftime("%Y-%m")),
-            "observacao": request.form.get("observacao", ""),
-            "conta_origem_id": parse_int(request.form.get("conta_origem_id")) if request.method == "POST" else (contas_cliente[0]["id"] if contas_cliente else None),
-            "conta_destino_id": parse_int(request.form.get("conta_destino_id")) if request.method == "POST" else (contas_proprias[0]["id"] if contas_proprias else None),
-        }
-
-        if request.method == "POST":
-            data_movimento = parse_iso_date(form["data_movimento"])
-            competencia = parse_competencia(form["competencia"])
-            errors: list[str] = []
-
-            if data_movimento is None:
-                errors.append("Informe uma data válida para o lançamento dos juros.")
-            elif data_movimento < date.fromisoformat(emprestimo["data_emprestimo"]):
-                errors.append("A data dos juros não pode ser anterior ao empréstimo.")
-
-            if competencia is None:
-                errors.append("Informe uma competência válida para os juros.")
-            elif competencia < emprestimo["data_emprestimo"][:7]:
-                errors.append("A competência não pode ser anterior ao mês do empréstimo.")
-
-            errors.extend(validate_money_flow_accounts(
-                emprestimo["cliente_id"], form["conta_origem_id"], form["conta_destino_id"],
-                is_loan_disbursement=False,
-            ))
-
-            if errors:
-                for error in errors:
-                    flash(error, "danger")
-            else:
-                db = get_db()
-                duplicate = db.execute(
-                    """
-                    SELECT id
-                      FROM movimentacoes_emprestimo
-                     WHERE emprestimo_id = ?
-                       AND tipo = 'JUROS'
-                       AND competencia = ?
-                     LIMIT 1
-                    """,
-                    (emprestimo_id, competencia),
-                ).fetchone()
-
-                if duplicate is not None:
-                    flash(
-                        f"Já existem juros lançados para a competência {format_competencia_br(competencia)}.",
-                        "warning",
-                    )
-                else:
-                    origem_banco, origem_pix, destino_banco, destino_pix = get_account_snapshots(
-                        form["conta_origem_id"], form["conta_destino_id"]
-                    )
-                    try:
-                        db.execute(
-                            """
-                            INSERT INTO movimentacoes_emprestimo (
-                                emprestimo_id, tipo, data_movimento, valor_centavos,
-                                observacao, competencia, usuario_id,
-                                saldo_antes_centavos, saldo_depois_centavos,
-                                conta_origem_id, conta_destino_id,
-                                origem_banco_snapshot, origem_pix_snapshot,
-                                destino_banco_snapshot, destino_pix_snapshot
-                            ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                emprestimo_id,
-                                data_movimento.isoformat(),
-                                juros_centavos,
-                                normalize_optional(form["observacao"]),
-                                competencia,
-                                g.usuario["id"],
-                                emprestimo["saldo_atual_centavos"],
-                                emprestimo["saldo_atual_centavos"],
-                                form["conta_origem_id"],
-                                form["conta_destino_id"],
-                                origem_banco, origem_pix, destino_banco, destino_pix,
-                            ),
-                        )
-                        registrar_auditoria(
-                            db,
-                            "emprestimo",
-                            emprestimo_id,
-                            "JUROS_LANCADOS",
-                            f"Competência {competencia}; valor {juros_centavos} centavos.",
-                        )
-                        db.commit()
-                    except sqlite3.IntegrityError:
-                        db.rollback()
-                        flash("Os juros desta competência já foram lançados.", "warning")
-                    else:
-                        flash(
-                            f"Juros de {format_money(juros_centavos)} registrados. O saldo principal não foi alterado.",
-                            "success",
-                        )
-                        return redirect(url_for("emprestimos_detalhe", emprestimo_id=emprestimo_id))
-
-        return render_template(
-            "emprestimos/movimento.html",
-            emprestimo=emprestimo,
-            operacao="JUROS",
-            form=form,
-            valor_calculado_centavos=juros_centavos,
-            contas_cliente=contas_cliente,
-            contas_proprias=contas_proprias,
-        )
+    def emprestimos_juros(emprestimo_id):
+        from recebimentos import juros
+        return juros(emprestimo_id)
 
     @app.route("/emprestimos/<int:emprestimo_id>/abatimento", methods=["GET", "POST"])
     @login_required
@@ -3495,630 +2785,8 @@ def register_routes(app: Flask) -> None:
     @app.route("/pagamentos-integrados/novo", methods=["GET", "POST"])
     @login_required
     def pagamentos_integrados_novo():
-        db = get_db()
-        sync_receivable_titles(db)
-
-        clientes = db.execute(
-            """
-            SELECT DISTINCT c.id, c.nome
-              FROM clientes c
-              JOIN emprestimos e ON e.cliente_id = c.id
-             ORDER BY c.nome COLLATE NOCASE
-            """
-        ).fetchall()
-
-        cliente_id = (
-            parse_int(request.form.get("cliente_id"))
-            if request.method == "POST"
-            else parse_int(request.args.get("cliente_id"))
-        )
-
-        cliente = None
-        emprestimos = []
-        titulos_abertos = []
-        contas_cliente = []
-        contas_proprias = get_own_accounts()
-
-        if cliente_id is not None:
-            cliente = db.execute(
-                "SELECT id, nome FROM clientes WHERE id = ?",
-                (cliente_id,),
-            ).fetchone()
-
-            if cliente is not None:
-                emprestimos = db.execute(
-                    """
-                    SELECT id, data_emprestimo, valor_original_centavos,
-                           saldo_atual_centavos, taxa_juros_mensal,
-                           data_primeiro_vencimento, dia_vencimento,
-                           status, descricao
-                      FROM emprestimos
-                     WHERE cliente_id = ?
-                     ORDER BY data_emprestimo, id
-                    """,
-                    (cliente_id,),
-                ).fetchall()
-
-                titulos_abertos = db.execute(
-                    """
-                    SELECT t.id, t.emprestimo_id, t.competencia,
-                           t.data_vencimento, t.valor_previsto_centavos,
-                           t.valor_recebido_centavos,
-                           t.saldo_base_centavos, t.taxa_juros_mensal,
-                           t.status, t.observacao, t.titulo_origem_id,
-                           t.natureza, t.sequencia,
-                           e.descricao, e.data_emprestimo
-                      FROM titulos_receber t
-                      JOIN emprestimos e ON e.id = t.emprestimo_id
-                     WHERE e.cliente_id = ?
-                       AND t.status IN ('PREVISTO', 'VENCIDO')
-                       AND t.movimentacao_id IS NULL
-                     ORDER BY
-                           CASE WHEN t.status = 'VENCIDO' THEN 0 ELSE 1 END,
-                           t.data_vencimento,
-                           t.emprestimo_id
-                    """,
-                    (cliente_id,),
-                ).fetchall()
-
-                contas_cliente = get_client_accounts(cliente_id)
-
-        form = {
-            "cliente_id": cliente_id,
-            "data_pagamento": request.form.get(
-                "data_pagamento",
-                date.today().isoformat(),
-            ),
-            "valor_total": request.form.get("valor_total", ""),
-            "conta_origem_id": (
-                parse_int(request.form.get("conta_origem_id"))
-                if request.method == "POST"
-                else (contas_cliente[0]["id"] if contas_cliente else None)
-            ),
-            "conta_destino_id": (
-                parse_int(request.form.get("conta_destino_id"))
-                if request.method == "POST"
-                else (contas_proprias[0]["id"] if contas_proprias else None)
-            ),
-            "observacao": request.form.get("observacao", ""),
-        }
-
-        selected_title_ids: list[int] = []
-        for value in request.form.getlist("titulo_id"):
-            parsed = parse_int(value)
-            if parsed is not None and parsed not in selected_title_ids:
-                selected_title_ids.append(parsed)
-
-        selected_manual_ids: list[int] = []
-        for value in request.form.getlist("emprestimo_manual_id"):
-            parsed = parse_int(value)
-            if parsed is not None and parsed not in selected_manual_ids:
-                selected_manual_ids.append(parsed)
-
-        if request.method == "POST":
-            errors: list[str] = []
-
-            if cliente is None:
-                errors.append("Selecione um cliente válido.")
-
-            data_pagamento = parse_iso_date(form["data_pagamento"])
-            if data_pagamento is None:
-                errors.append("Informe uma data válida para o pagamento.")
-
-            valor_total_centavos = parse_money_to_centavos(form["valor_total"])
-            if valor_total_centavos is None or valor_total_centavos <= 0:
-                errors.append("Informe o valor total recebido.")
-
-            if cliente is not None:
-                errors.extend(
-                    validate_money_flow_accounts(
-                        cliente_id,
-                        form["conta_origem_id"],
-                        form["conta_destino_id"],
-                        is_loan_disbursement=False,
-                    )
-                )
-
-            itens: list[dict[str, Any]] = []
-            total_rateado = 0
-            pares_usados: set[tuple[int, str]] = set()
-
-            # 1) Títulos já em aberto. O usuário pode baixar o valor integral
-            # ou apenas uma parte. No pagamento parcial, o título selecionado
-            # vira PARCIAL e nasce um novo SALDO_JUROS com a mesma competência
-            # e vencimento, relacionado ao documento anterior.
-            if cliente is not None:
-                titulos_by_id = {int(row["id"]): row for row in titulos_abertos}
-
-                for titulo_id in selected_title_ids:
-                    titulo = titulos_by_id.get(titulo_id)
-
-                    if titulo is None:
-                        errors.append(
-                            f"O título #{titulo_id} não está mais disponível em aberto "
-                            "para este cliente."
-                        )
-                        continue
-
-                    par = (
-                        int(titulo["emprestimo_id"]),
-                        str(titulo["competencia"]),
-                    )
-                    if par in pares_usados:
-                        errors.append(
-                            f"O empréstimo #{par[0]} / "
-                            f"{format_competencia_br(par[1])} foi selecionado mais de uma vez."
-                        )
-                        continue
-
-                    valor_documento = int(titulo["valor_previsto_centavos"])
-                    valor_item = parse_money_to_centavos(
-                        request.form.get(
-                            f"valor_titulo_{titulo_id}",
-                            format_money(valor_documento).replace("R$ ", ""),
-                        )
-                    )
-
-                    if valor_item is None or valor_item <= 0:
-                        errors.append(
-                            f"Informe o valor recebido do título #{titulo_id}."
-                        )
-                        continue
-
-                    if valor_item > valor_documento:
-                        errors.append(
-                            f"Título #{titulo_id}: o valor recebido não pode superar "
-                            f"o saldo do documento ({format_money(valor_documento)})."
-                        )
-                        continue
-
-                    pares_usados.add(par)
-                    itens.append(
-                        {
-                            "emprestimo_id": par[0],
-                            "competencia": par[1],
-                            "valor_centavos": int(valor_item),
-                            "valor_integral_centavos": valor_documento,
-                            "saldo_base_centavos": int(titulo["saldo_base_centavos"]),
-                            "taxa_juros_mensal": titulo["taxa_juros_mensal"],
-                            "titulo_receber_id": titulo_id,
-                            "origem_item": "TITULO",
-                            "parcial": int(valor_item) < valor_documento,
-                        }
-                    )
-                    total_rateado += int(valor_item)
-
-            # 2) Lançamentos manuais/históricos para competências que ainda
-            # não possuem documento aberto. O valor pode ser integral ou parcial.
-            # Quando parcial, o sistema cria o documento original e, em seguida,
-            # um SALDO_JUROS vinculado para o restante.
-            if cliente is not None and data_pagamento is not None:
-                loans_by_id = {int(row["id"]): row for row in emprestimos}
-
-                for emprestimo_id in selected_manual_ids:
-                    loan = loans_by_id.get(emprestimo_id)
-
-                    if loan is None:
-                        errors.append(
-                            f"O empréstimo #{emprestimo_id} não pertence ao cliente selecionado."
-                        )
-                        continue
-
-                    competencia = parse_competencia(
-                        request.form.get(
-                            f"competencia_manual_{emprestimo_id}",
-                            "",
-                        )
-                    )
-                    valor_item = parse_money_to_centavos(
-                        request.form.get(
-                            f"valor_manual_{emprestimo_id}",
-                            "",
-                        )
-                    )
-
-                    if competencia is None:
-                        errors.append(
-                            f"Informe a competência dos juros do empréstimo #{emprestimo_id}."
-                        )
-                        continue
-
-                    if competencia < loan["data_emprestimo"][:7]:
-                        errors.append(
-                            f"A competência do empréstimo #{emprestimo_id} "
-                            "não pode ser anterior ao contrato."
-                        )
-                        continue
-
-                    if valor_item is None or valor_item <= 0:
-                        errors.append(
-                            f"Informe o valor de juros do empréstimo #{emprestimo_id}."
-                        )
-                        continue
-
-                    par = (emprestimo_id, competencia)
-                    if par in pares_usados:
-                        errors.append(
-                            f"O empréstimo #{emprestimo_id} / "
-                            f"{format_competencia_br(competencia)} já foi selecionado "
-                            "na seção de títulos em aberto."
-                        )
-                        continue
-
-                    titulo_aberto = db.execute(
-                        """
-                        SELECT id
-                          FROM titulos_receber
-                         WHERE emprestimo_id = ?
-                           AND tipo = 'JUROS'
-                           AND competencia = ?
-                           AND status IN ('PREVISTO', 'VENCIDO')
-                         ORDER BY sequencia DESC, id DESC
-                         LIMIT 1
-                        """,
-                        par,
-                    ).fetchone()
-
-                    if titulo_aberto is not None:
-                        errors.append(
-                            f"Existe o título em aberto #{titulo_aberto['id']} para o "
-                            f"empréstimo #{emprestimo_id} / "
-                            f"{format_competencia_br(competencia)}. "
-                            "Selecione esse título na seção 'Títulos em aberto'."
-                        )
-                        continue
-
-                    # Se já houve recebimentos na competência sem saldo em aberto,
-                    # consideramos a obrigação encerrada e evitamos novo manual.
-                    recebido_competencia = int(
-                        db.execute(
-                            """
-                            SELECT COALESCE(SUM(valor_centavos), 0) AS total
-                              FROM movimentacoes_emprestimo
-                             WHERE emprestimo_id = ?
-                               AND tipo = 'JUROS'
-                               AND competencia = ?
-                            """,
-                            par,
-                        ).fetchone()["total"]
-                    )
-
-                    try:
-                        saldo_base = saldo_principal_antes_da_data(
-                            db,
-                            emprestimo_id,
-                            data_pagamento,
-                        )
-                    except ValueError as exc:
-                        errors.append(str(exc))
-                        continue
-
-                    if saldo_base <= 0:
-                        errors.append(
-                            f"O empréstimo #{emprestimo_id} não possuía saldo "
-                            "devedor na data informada."
-                        )
-                        continue
-
-                    juros_esperado = calcular_juros_centavos(
-                        saldo_base,
-                        loan["taxa_juros_mensal"],
-                    )
-
-                    if recebido_competencia >= juros_esperado:
-                        errors.append(
-                            f"O empréstimo #{emprestimo_id} já possui "
-                            f"{format_money(recebido_competencia)} de juros recebidos "
-                            f"para {format_competencia_br(competencia)}."
-                        )
-                        continue
-
-                    saldo_obrigacao = juros_esperado - recebido_competencia
-                    if valor_item > saldo_obrigacao:
-                        errors.append(
-                            f"Empréstimo #{emprestimo_id}: o saldo de juros da competência "
-                            f"é {format_money(saldo_obrigacao)}. O valor informado "
-                            f"({format_money(valor_item)}) é maior que o devido."
-                        )
-                        continue
-
-                    # Se já houve algum pagamento na competência mas não há título
-                    # em aberto, não inventamos nova cadeia silenciosamente.
-                    if recebido_competencia > 0:
-                        errors.append(
-                            f"O empréstimo #{emprestimo_id} já possui recebimento parcial "
-                            f"de {format_money(recebido_competencia)} em "
-                            f"{format_competencia_br(competencia)}, mas não há documento "
-                            "de saldo em aberto. Corrija a agenda antes de continuar."
-                        )
-                        continue
-
-                    due_day = int(
-                        loan["dia_vencimento"]
-                        or (
-                            date.fromisoformat(loan["data_primeiro_vencimento"]).day
-                            if loan["data_primeiro_vencimento"]
-                            else date.fromisoformat(loan["data_emprestimo"]).day
-                        )
-                    )
-                    vencimento_documento = due_date_for_competence(
-                        competencia,
-                        due_day,
-                    )
-
-                    pares_usados.add(par)
-                    itens.append(
-                        {
-                            "emprestimo_id": emprestimo_id,
-                            "competencia": competencia,
-                            "valor_centavos": int(valor_item),
-                            "valor_integral_centavos": int(juros_esperado),
-                            "saldo_base_centavos": int(saldo_base),
-                            "taxa_juros_mensal": loan["taxa_juros_mensal"],
-                            "titulo_receber_id": None,
-                            "origem_item": "MANUAL",
-                            "parcial": int(valor_item) < int(juros_esperado),
-                            "data_vencimento": vencimento_documento,
-                        }
-                    )
-                    total_rateado += int(valor_item)
-
-            emprestimos_distintos = {
-                int(item["emprestimo_id"])
-                for item in itens
-            }
-            if len(emprestimos_distintos) < 2:
-                errors.append(
-                    "Um pagamento integrado precisa distribuir o recebimento "
-                    "entre pelo menos dois empréstimos diferentes."
-                )
-
-            if (
-                valor_total_centavos is not None
-                and valor_total_centavos > 0
-                and total_rateado != valor_total_centavos
-            ):
-                errors.append(
-                    "A soma dos rateios "
-                    f"({format_money(total_rateado)}) precisa ser exatamente igual "
-                    f"ao valor total recebido ({format_money(valor_total_centavos)})."
-                )
-
-            if errors:
-                for error in errors:
-                    flash(error, "danger")
-            else:
-                origem_banco, origem_pix, destino_banco, destino_pix = get_account_snapshots(
-                    form["conta_origem_id"],
-                    form["conta_destino_id"],
-                )
-
-                try:
-                    cursor = db.execute(
-                        """
-                        INSERT INTO pagamentos_integrados (
-                            cliente_id, data_pagamento, valor_total_centavos,
-                            conta_origem_id, conta_destino_id,
-                            origem_banco_snapshot, origem_pix_snapshot,
-                            destino_banco_snapshot, destino_pix_snapshot,
-                            observacao, usuario_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            cliente_id,
-                            data_pagamento.isoformat(),
-                            valor_total_centavos,
-                            form["conta_origem_id"],
-                            form["conta_destino_id"],
-                            origem_banco,
-                            origem_pix,
-                            destino_banco,
-                            destino_pix,
-                            normalize_optional(form["observacao"]),
-                            g.usuario["id"],
-                        ),
-                    )
-                    pagamento_id = int(cursor.lastrowid)
-
-                    auditoria_itens: list[dict[str, Any]] = []
-
-                    for item in itens:
-                        # Em um item manual parcial, criamos primeiro o documento
-                        # original de juros. A movimentação deste pagamento ficará
-                        # vinculada a ele e a baixa criará o SALDO_JUROS.
-                        if (
-                            item["titulo_receber_id"] is None
-                            and item["origem_item"] == "MANUAL"
-                            and item.get("parcial")
-                        ):
-                            item["titulo_receber_id"] = criar_titulo_manual_parcial(
-                                db,
-                                emprestimo_id=item["emprestimo_id"],
-                                competencia=item["competencia"],
-                                data_vencimento=item["data_vencimento"],
-                                valor_integral_centavos=item["valor_integral_centavos"],
-                                saldo_base_centavos=item["saldo_base_centavos"],
-                                taxa_juros_mensal=item["taxa_juros_mensal"],
-                            )
-
-                        observacao_movimento = f"Pagamento integrado #{pagamento_id}"
-                        if item["titulo_receber_id"] is not None:
-                            observacao_movimento += (
-                                f" — Título a receber #{item['titulo_receber_id']}"
-                            )
-                        if item.get("parcial"):
-                            observacao_movimento += " — RECEBIMENTO PARCIAL DE JUROS"
-
-                        if normalize_optional(form["observacao"]):
-                            observacao_movimento += (
-                                f" — {normalize_optional(form['observacao'])}"
-                            )
-
-                        cursor_mov = db.execute(
-                            """
-                            INSERT INTO movimentacoes_emprestimo (
-                                emprestimo_id, tipo, data_movimento,
-                                valor_centavos, observacao, competencia,
-                                usuario_id, saldo_antes_centavos,
-                                saldo_depois_centavos,
-                                conta_origem_id, conta_destino_id,
-                                origem_banco_snapshot, origem_pix_snapshot,
-                                destino_banco_snapshot, destino_pix_snapshot,
-                                pagamento_integrado_id, titulo_receber_id
-                            ) VALUES (
-                                ?, 'JUROS', ?, ?, ?, ?, ?, ?, ?,
-                                ?, ?, ?, ?, ?, ?, ?, ?
-                            )
-                            """,
-                            (
-                                item["emprestimo_id"],
-                                data_pagamento.isoformat(),
-                                item["valor_centavos"],
-                                observacao_movimento,
-                                item["competencia"],
-                                g.usuario["id"],
-                                item["saldo_base_centavos"],
-                                item["saldo_base_centavos"],
-                                form["conta_origem_id"],
-                                form["conta_destino_id"],
-                                origem_banco,
-                                origem_pix,
-                                destino_banco,
-                                destino_pix,
-                                pagamento_id,
-                                item["titulo_receber_id"],
-                            ),
-                        )
-                        movimento_id = int(cursor_mov.lastrowid)
-
-                        db.execute(
-                            """
-                            INSERT INTO pagamentos_integrados_itens (
-                                pagamento_integrado_id, emprestimo_id,
-                                tipo, competencia, valor_centavos,
-                                saldo_base_centavos, movimentacao_id,
-                                titulo_receber_id, origem_item
-                            ) VALUES (?, ?, 'JUROS', ?, ?, ?, ?, ?, ?)
-                            """,
-                            (
-                                pagamento_id,
-                                item["emprestimo_id"],
-                                item["competencia"],
-                                item["valor_centavos"],
-                                item["saldo_base_centavos"],
-                                movimento_id,
-                                item["titulo_receber_id"],
-                                item["origem_item"],
-                            ),
-                        )
-
-                        titulo_saldo_id = None
-                        if item["titulo_receber_id"] is not None:
-                            titulo_saldo_id = aplicar_recebimento_titulo(
-                                db,
-                                titulo_id=item["titulo_receber_id"],
-                                valor_recebido_centavos=item["valor_centavos"],
-                                movimentacao_id=movimento_id,
-                                data_recebimento=data_pagamento,
-                                observacao=observacao_movimento,
-                            )
-
-                        auditoria_itens.append(
-                            {
-                                **item,
-                                "movimentacao_id": movimento_id,
-                                "titulo_saldo_id": titulo_saldo_id,
-                            }
-                        )
-
-                    registrar_auditoria(
-                        db,
-                        "pagamento_integrado",
-                        pagamento_id,
-                        "CRIADO",
-                        json.dumps(
-                            {
-                                "cliente_id": cliente_id,
-                                "data_pagamento": data_pagamento.isoformat(),
-                                "valor_total_centavos": valor_total_centavos,
-                                "itens": auditoria_itens,
-                            },
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            # Itens manuais carregam data_vencimento como
-                            # datetime.date. A auditoria precisa transformá-la
-                            # em texto ISO para não provocar TypeError/HTTP 500.
-                            default=lambda value: (
-                                value.isoformat()
-                                if isinstance(value, (date, datetime))
-                                else str(value)
-                            ),
-                        ),
-                    )
-
-                    # Cabeçalho, rateios, movimentos e baixa dos títulos
-                    # são persistidos em uma única transação.
-                    db.commit()
-
-                except Exception as exc:
-                    db.rollback()
-                    app.logger.exception("Erro ao registrar pagamento integrado")
-                    flash(
-                        "O pagamento integrado não foi gravado. "
-                        f"Erro interno: {type(exc).__name__}: {exc}",
-                        "danger",
-                    )
-                else:
-                    flash(
-                        f"Pagamento integrado #{pagamento_id} registrado. "
-                        f"{len(itens)} juros foram baixados.",
-                        "success",
-                    )
-                    return redirect(
-                        url_for(
-                            "pagamentos_integrados_detalhe",
-                            pagamento_id=pagamento_id,
-                        )
-                    )
-
-        default_competencia = (
-            form["data_pagamento"][:7]
-            if len(form["data_pagamento"]) >= 7
-            else date.today().strftime("%Y-%m")
-        )
-
-        linhas_form: dict[int, dict[str, Any]] = {}
-        for loan in emprestimos:
-            loan_id = int(loan["id"])
-            linhas_form[loan_id] = {
-                "selected": loan_id in selected_manual_ids,
-                "competencia": request.form.get(
-                    f"competencia_manual_{loan_id}",
-                    default_competencia,
-                ),
-                "valor": request.form.get(
-                    f"valor_manual_{loan_id}",
-                    format_money(
-                        calcular_juros_centavos(
-                            loan["saldo_atual_centavos"],
-                            loan["taxa_juros_mensal"],
-                        )
-                    ).replace("R$ ", ""),
-                ),
-            }
-
-        return render_template(
-            "pagamentos_integrados/form.html",
-            clientes=clientes,
-            cliente=cliente,
-            emprestimos=emprestimos,
-            titulos_abertos=titulos_abertos,
-            selected_title_ids=selected_title_ids,
-            contas_cliente=contas_cliente,
-            contas_proprias=contas_proprias,
-            form=form,
-            linhas_form=linhas_form,
-        )
+        from recebimentos import novo
+        return novo()
 
     @app.get("/pagamentos-integrados/<int:pagamento_id>")
     @login_required
@@ -4128,6 +2796,8 @@ def register_routes(app: Flask) -> None:
             """
             SELECT i.id, i.emprestimo_id, i.competencia,
                    i.valor_centavos, i.saldo_base_centavos,
+                   i.valor_base_centavos, i.dias_atraso, i.juros_atraso_centavos,
+                   i.data_base_atraso, i.data_calculo_atraso,
                    i.movimentacao_id, i.titulo_receber_id, i.origem_item,
                    e.taxa_juros_mensal, e.descricao,
                    t.status AS titulo_status,
@@ -4382,6 +3052,12 @@ def register_routes(app: Flask) -> None:
                     errors.append("Informe uma data válida para a movimentação.")
                 elif data_movimento < date.fromisoformat(emprestimo["data_emprestimo"]):
                     errors.append("A data não pode ser anterior à data do empréstimo.")
+
+            if (movimento["tipo"] == "JUROS" and movimento["valor_base_centavos"] is not None
+                    and data_movimento is not None
+                    and data_movimento.isoformat() != movimento["data_movimento"]):
+                errors.append("Para mudar a data de juros com detalhamento, estorne o recebimento "
+                              "e registre-o novamente conferindo a prévia de atraso.")
 
             competencia = movimento["competencia"]
             if movimento["tipo"] == "JUROS":
@@ -5083,190 +3759,9 @@ def register_routes(app: Flask) -> None:
 
     @app.route("/receber/<int:titulo_id>", methods=["GET", "POST"])
     @login_required
-    def titulos_receber_detalhe(titulo_id: int):
-        db = get_db()
-        sync_receivable_titles(db)
-        titulo = get_titulo_receber_or_404(titulo_id)
-
-        contas_cliente = get_client_accounts(titulo["cliente_id"])
-        contas_proprias = get_own_accounts()
-
-        form = {
-            "data_recebimento": request.form.get(
-                "data_recebimento",
-                date.today().isoformat(),
-            ),
-            "valor_recebido": request.form.get(
-                "valor_recebido",
-                format_money(titulo["valor_previsto_centavos"]).replace("R$ ", ""),
-            ),
-            "conta_origem_id": (
-                parse_int(request.form.get("conta_origem_id"))
-                if request.method == "POST"
-                else (contas_cliente[0]["id"] if contas_cliente else None)
-            ),
-            "conta_destino_id": (
-                parse_int(request.form.get("conta_destino_id"))
-                if request.method == "POST"
-                else (contas_proprias[0]["id"] if contas_proprias else None)
-            ),
-            "observacao": request.form.get("observacao", ""),
-        }
-
-        if request.method == "POST":
-            if titulo["status"] not in {"PREVISTO", "VENCIDO"}:
-                flash("Este título não está mais em aberto.", "warning")
-                return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
-
-            data_recebimento = parse_iso_date(form["data_recebimento"])
-            valor_recebido = parse_money_to_centavos(form["valor_recebido"])
-            errors: list[str] = []
-
-            if data_recebimento is None:
-                errors.append("Informe uma data válida para o recebimento.")
-            elif data_recebimento < date.fromisoformat(titulo["data_emprestimo"]):
-                errors.append("A data do recebimento não pode ser anterior ao empréstimo.")
-
-            valor_documento = int(titulo["valor_previsto_centavos"])
-            if valor_recebido is None or valor_recebido <= 0:
-                errors.append("Informe o valor efetivamente recebido.")
-            elif valor_recebido > valor_documento:
-                errors.append(
-                    f"O valor recebido não pode superar o saldo do documento "
-                    f"({format_money(valor_documento)})."
-                )
-
-            errors.extend(
-                validate_money_flow_accounts(
-                    titulo["cliente_id"],
-                    form["conta_origem_id"],
-                    form["conta_destino_id"],
-                    is_loan_disbursement=False,
-                )
-            )
-
-            if errors:
-                for error in errors:
-                    flash(error, "danger")
-            else:
-                origem_banco, origem_pix, destino_banco, destino_pix = get_account_snapshots(
-                    form["conta_origem_id"],
-                    form["conta_destino_id"],
-                )
-
-                try:
-                    parcial = int(valor_recebido) < valor_documento
-                    observacao_mov = normalize_optional(form["observacao"])
-                    if parcial:
-                        base = "RECEBIMENTO PARCIAL DE JUROS"
-                        observacao_mov = (
-                            f"{base} — {observacao_mov}" if observacao_mov else base
-                        )
-
-                    cursor = db.execute(
-                        """
-                        INSERT INTO movimentacoes_emprestimo (
-                            emprestimo_id, tipo, data_movimento, valor_centavos,
-                            observacao, competencia, usuario_id,
-                            saldo_antes_centavos, saldo_depois_centavos,
-                            conta_origem_id, conta_destino_id,
-                            origem_banco_snapshot, origem_pix_snapshot,
-                            destino_banco_snapshot, destino_pix_snapshot,
-                            titulo_receber_id
-                        ) VALUES (?, 'JUROS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            titulo["emprestimo_id"],
-                            data_recebimento.isoformat(),
-                            valor_recebido,
-                            observacao_mov,
-                            titulo["competencia"],
-                            g.usuario["id"],
-                            titulo["saldo_base_centavos"],
-                            titulo["saldo_base_centavos"],
-                            form["conta_origem_id"],
-                            form["conta_destino_id"],
-                            origem_banco,
-                            origem_pix,
-                            destino_banco,
-                            destino_pix,
-                            titulo_id,
-                        ),
-                    )
-                    movement_id = int(cursor.lastrowid)
-
-                    saldo_id = aplicar_recebimento_titulo(
-                        db,
-                        titulo_id=titulo_id,
-                        valor_recebido_centavos=int(valor_recebido),
-                        movimentacao_id=movement_id,
-                        data_recebimento=data_recebimento,
-                        observacao=observacao_mov,
-                    )
-
-                    registrar_auditoria(
-                        db,
-                        "titulo_receber",
-                        titulo_id,
-                        "RECEBIMENTO_PARCIAL" if saldo_id else "RECEBIDO",
-                        json.dumps(
-                            {
-                                "valor_recebido_centavos": int(valor_recebido),
-                                "movimentacao_id": movement_id,
-                                "titulo_saldo_id": saldo_id,
-                            },
-                            ensure_ascii=False,
-                            sort_keys=True,
-                        ),
-                    )
-                    db.commit()
-                except (sqlite3.DatabaseError, ValueError) as exc:
-                    db.rollback()
-                    app.logger.exception("Erro ao confirmar título a receber")
-                    flash(f"O recebimento não foi gravado: {exc}", "danger")
-                else:
-                    if saldo_id:
-                        flash(
-                            f"Recebimento parcial de {format_money(valor_recebido)} registrado. "
-                            f"O saldo restante foi gerado no título #{saldo_id}.",
-                            "success",
-                        )
-                        return redirect(url_for("titulos_receber_detalhe", titulo_id=saldo_id))
-
-                    flash(
-                        f"Recebimento de {format_money(valor_recebido)} confirmado.",
-                        "success",
-                    )
-                    return redirect(url_for("titulos_receber_detalhe", titulo_id=titulo_id))
-
-        titulo = get_titulo_receber_or_404(titulo_id)
-        titulo_origem = None
-        if titulo["titulo_origem_id"] is not None:
-            titulo_origem = db.execute(
-                "SELECT id, status, valor_previsto_centavos FROM titulos_receber WHERE id = ?",
-                (titulo["titulo_origem_id"],),
-            ).fetchone()
-
-        titulos_saldo = db.execute(
-            """
-            SELECT id, status, valor_previsto_centavos, valor_recebido_centavos,
-                   data_vencimento, sequencia
-              FROM titulos_receber
-             WHERE titulo_origem_id = ?
-             ORDER BY sequencia, id
-            """,
-            (titulo_id,),
-        ).fetchall()
-
-        return render_template(
-            "receber/detalhe.html",
-            titulo=titulo,
-            titulo_origem=titulo_origem,
-            titulos_saldo=titulos_saldo,
-            contas_cliente=contas_cliente,
-            contas_proprias=contas_proprias,
-            form=form,
-        )
+    def titulos_receber_detalhe(titulo_id):
+        from recebimentos import detalhe
+        return detalhe(titulo_id)
 
 
     @app.route("/receber/<int:titulo_id>/editar", methods=["GET", "POST"])
@@ -5317,6 +3812,12 @@ def register_routes(app: Flask) -> None:
             valor_previsto = parse_money_to_centavos(form["valor_previsto"])
             motivo = form["motivo_alteracao"].strip()
             senha = request.form.get("senha_confirmacao", "")
+
+            if (titulo["valor_base_centavos"] is not None
+                    and (form["data_vencimento"] != titulo["data_vencimento"]
+                         or valor_previsto != titulo["valor_previsto_centavos"])):
+                errors.append("Este título já tem detalhamento de atraso. Use Reagendar títulos "
+                              "para alterar datas e valores com uma nova prévia.")
 
             if not validar_senha_usuario_atual(senha):
                 errors.append(
@@ -5592,76 +4093,8 @@ def register_routes(app: Flask) -> None:
     @app.post("/receber/alterar-lote")
     @login_required
     def titulos_receber_lote():
-        from reagendamento import planejar
-        db = get_db()
-        plano = []
-        erro = None
-        automatica = request.headers.get("X-Receivable-Preview") == "1"
-        ids = sorted(set(request.form.getlist("titulo_id")))
-        try:
-            if automatica and request.form.get("acao") != "prever":
-                raise ValueError("A prévia automática não permite salvar alterações.")
-            if not ids or len(ids) > 500 or any(not i.isdigit() for i in ids):
-                raise ValueError("Selecione entre 1 e 500 títulos válidos.")
-            db.execute("BEGIN IMMEDIATE")
-            titulos = [get_titulo_receber_or_404(int(i)) for i in ids]
-            if request.form.get("acao") in {"prever", "salvar"}:
-                nova_data = parse_iso_date(request.form.get("nova_data"))
-                dia = parse_int(request.form.get("dia"))
-                plano = planejar(titulos, nova_data=nova_data, dia=dia,
-                                 proporcional=request.form.get("proporcional") == "1")
-                if request.form.get("futuros") == "1" and not dia:
-                    raise ValueError("Para manter o dia nos próximos títulos, informe o dia mensal.")
-                if request.form.get("acao") == "salvar":
-                    if not validar_senha_usuario_atual(request.form.get("senha_confirmacao", "")):
-                        raise ValueError("A senha do usuário logado é inválida.")
-                    motivo = request.form.get("motivo", "").strip()
-                    if len(motivo) < 5:
-                        raise ValueError("Informe um motivo com pelo menos 5 caracteres.")
-                    # Confirmação vinculada à prévia: alterações concorrentes exigem nova revisão.
-                    from hashlib import sha256
-                    assinatura = sha256(json.dumps(plano, sort_keys=True).encode()).hexdigest()
-                    if request.form.get("assinatura") != assinatura:
-                        raise ValueError("Os títulos mudaram desde a prévia. Revise e confirme novamente.")
-                    for item in plano:
-                        t = item["titulo"]
-                        db.execute("""UPDATE titulos_receber SET data_vencimento=?,
-                            valor_previsto_centavos=?, status=?, ajuste_manual=1,
-                            updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-                            (item["nova_data"], item["valor"], status_aberto_por_vencimento(item["nova_data"]), t["id"]))
-                        depois = db.execute("SELECT * FROM titulos_receber WHERE id=?", (t["id"],)).fetchone()
-                        registrar_auditoria(db, "titulo_receber", t["id"], "REAGENDADO",
-                            json.dumps(dict(motivo=motivo, antes=titulo_receber_para_auditoria(t),
-                                depois=titulo_receber_para_auditoria(depois), dias=item["dias"],
-                                adicional_centavos=item["adicional"], base_dias=30), ensure_ascii=False))
-                    if request.form.get("futuros") == "1":
-                        for eid in {t["emprestimo_id"] for t in titulos}:
-                            antes = db.execute("SELECT dia_vencimento FROM emprestimos WHERE id=?", (eid,)).fetchone()[0]
-                            # Inclui os títulos futuros já gerados na confirmação, evitando agendas divergentes.
-                            limite = min(t["data_vencimento"] for t in titulos if t["emprestimo_id"] == eid)
-                            faltantes = db.execute("""SELECT id FROM titulos_receber WHERE emprestimo_id=?
-                                AND data_vencimento>=? AND status IN ('PREVISTO','VENCIDO')""", (eid, limite)).fetchall()
-                            if any(str(t["id"]) not in ids for t in faltantes):
-                                raise ValueError("Para manter o novo dia, selecione também todos os títulos futuros em aberto do empréstimo.")
-                            db.execute("UPDATE emprestimos SET dia_vencimento=? WHERE id=?", (dia, eid))
-                            registrar_auditoria(db, "emprestimo", eid, "VENCIMENTO_ALTERADO",
-                                json.dumps(dict(motivo=motivo, antes=antes, depois=dia)))
-                    db.commit()
-                    flash("Vencimentos alterados e ajuste de juros registrado na auditoria.", "success")
-                    return redirect(url_for("titulos_receber_lista"))
-            db.rollback()
-        except (ValueError, sqlite3.DatabaseError) as exc:
-            db.rollback()
-            erro = str(exc)
-            plano = []
-            if not automatica:
-                flash(erro, "danger")
-        from hashlib import sha256
-        assinatura = sha256(json.dumps(plano, sort_keys=True).encode()).hexdigest()
-        if automatica:
-            return {"html": render_template("receber/_previa.html", plano=plano),
-                    "assinatura": assinatura if plano else "", "erro": erro}
-        return render_template("receber/lote.html", ids=ids, plano=plano, assinatura=assinatura)
+        from reagendamento import reagendar
+        return reagendar()
 
     @app.route("/receber/<int:titulo_id>/excluir", methods=["GET", "POST"])
     @login_required
@@ -6900,6 +5333,14 @@ def conferencia_mensal_cliente(
         (cliente_id,),
     ).fetchall()
 
+    documentos = {
+        (t["emprestimo_id"], t["competencia"]): t
+        for t in db.execute("""SELECT t.* FROM titulos_receber t
+            JOIN emprestimos e ON e.id=t.emprestimo_id WHERE e.cliente_id=?
+            AND t.valor_base_centavos IS NOT NULL AND t.titulo_origem_id IS NULL
+            AND t.status<>'CANCELADO'""", (cliente_id,)).fetchall()
+    }
+
     juros_rows = db.execute(
         """
         SELECT m.emprestimo_id, m.competencia,
@@ -7012,10 +5453,14 @@ def conferencia_mensal_cliente(
                 dia_vencimento=dia_vencimento,
             )
 
-            if vencimento < primeiro_vencimento:
+            documento = documentos.get((int(emprestimo["id"]), competencia))
+            if documento is not None:
+                vencimento = date.fromisoformat(documento["data_vencimento"])
+
+            if documento is None and vencimento < primeiro_vencimento:
                 continue
 
-            if data_quitacao is not None and data_quitacao < vencimento:
+            if documento is None and data_quitacao is not None and data_quitacao < vencimento:
                 continue
 
             saldo_base = saldo_principal_antes_da_data(
@@ -7024,6 +5469,9 @@ def conferencia_mensal_cliente(
                 vencimento,
             )
 
+            if documento is not None:
+                saldo_base = int(documento["saldo_base_centavos"])
+
             if saldo_base <= 0:
                 continue
 
@@ -7031,6 +5479,9 @@ def conferencia_mensal_cliente(
                 saldo_base,
                 emprestimo["taxa_juros_mensal"],
             )
+
+            if documento is not None:
+                esperado = int(documento["valor_previsto_centavos"])
 
             if esperado <= 0:
                 continue
@@ -7438,10 +5889,10 @@ def get_emprestimo_or_404(emprestimo_id: int) -> sqlite3.Row:
 
 
 if __name__ == "__main__":
-    # O portal importa helpers de app; inicialize apenas no módulo canônico.
-    from app import app
-else:
-    app = create_app()
+    # O portal importa helpers de app; reutiliza o módulo em execução.
+    sys.modules.setdefault("app", sys.modules[__name__])
+
+app = create_app()
 
 
 if __name__ == "__main__":

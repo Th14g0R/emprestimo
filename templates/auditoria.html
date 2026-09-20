@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}Auditoria{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>Auditoria</h1>
+</div>
+<div class="actions">
+</div>
+</header>
+<section class="panel">
+<p class="muted">Últimos 200 eventos registrados. Valores e correções preservam o histórico da operação.</p>{{ table(eventos,[('created_at','Data e hora'),('usuario_nome','Usuário'),('entidade','Entidade'),('entidade_id','Registro'),('acao','Ação'),('detalhes','Detalhes')]) }}</section>{% endblock %}

@@ -2,7 +2,7 @@
 param(
     [string]$SourcePath,
     [string]$RepositoryUrl = 'https://github.com/Th14g0R/emprestimo.git',
-    [string]$Branch = 'main'
+    [string]$Branch = 'release/v2'
 )
 
 Set-StrictMode -Version Latest

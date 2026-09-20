@@ -1,28 +1,16 @@
-{% extends "base.html" %}
-{% block title %}{{ titulo }}{% endblock %}
-{% block content %}
-<div class="page-header"><div><h1>{{ titulo }}</h1><p class="muted">Cadastre banco, PIX e dados suficientes para identificar a origem ou destino do dinheiro.</p></div></div>
-<form method="post" class="card section-card">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<div class="form-grid form-grid-2">
-<label>Tipo de titular
-<select name="tipo_titular" id="tipo_titular" required>
-<option value="NOSSA" {{ 'selected' if conta['tipo_titular'] == 'NOSSA' }}>Minha conta</option>
-<option value="CLIENTE" {{ 'selected' if conta['tipo_titular'] == 'CLIENTE' }}>Conta de cliente</option>
-</select></label>
-<label id="cliente-field">Cliente
-<select name="cliente_id" id="cliente_id"><option value="">Selecione...</option>{% for cliente in clientes %}<option value="{{ cliente['id'] }}" {{ 'selected' if conta['cliente_id']|string == cliente['id']|string }}>{{ cliente['nome'] }}</option>{% endfor %}</select></label>
-<label>Banco<input name="banco" maxlength="100" value="{{ conta['banco'] }}" required placeholder="Ex.: Nubank"></label>
-<label>Descrição<input name="descricao" maxlength="120" value="{{ conta['descricao'] }}" placeholder="Ex.: Conta principal"></label>
-<label>Agência<input name="agencia" maxlength="30" value="{{ conta['agencia'] }}"></label>
-<label>Conta<input name="conta" maxlength="40" value="{{ conta['conta'] }}"></label>
-<label>Tipo de conta<input name="tipo_conta" maxlength="50" value="{{ conta['tipo_conta'] }}" placeholder="Corrente, pagamento..."></label>
-<label>Chave PIX<input name="chave_pix" maxlength="180" value="{{ conta['chave_pix'] }}" placeholder="CPF, telefone, e-mail ou aleatória"></label>
-<label class="checkbox-label field-span-2"><input type="checkbox" name="principal" value="1" {{ 'checked' if conta['principal'] }}> Usar como conta padrão deste titular</label>
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}{{ titulo }}{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>{{ titulo }}</h1>
 </div>
-<div class="form-actions"><a class="button button-light" href="{{ url_for('contas_lista') }}">Cancelar</a><button class="button" type="submit">Salvar conta</button></div>
+<div class="actions">
+</div>
+</header>
+<section class="panel">
+<form method="post">{{ csrf() }}<div class="form-grid">{{ select('tipo_titular','Titularidade',[{'id':'NOSSA','nome':'Conta própria'},{'id':'CLIENTE','nome':'Conta de cliente'}],conta.tipo_titular) }}{{ select('cliente_id','Cliente (apenas conta de cliente)',clientes,conta.cliente_id,required=false) }}{% for key,label in [('banco','Banco'),('descricao','Descrição'),('agencia','Agência'),('conta','Conta'),('tipo_conta','Tipo de conta'),('chave_pix','Chave PIX')] %}{{ field(key,label,conta[key]|default(''),required=key=='banco') }}{% endfor %}</div>
+<label class="check">
+<input type="checkbox" name="principal" value="1" {% if conta.principal %}checked{% endif %}>Conta principal</label>
+<button class="button primary">Salvar conta</button>
 </form>
-<script>
-(function(){ const tipo=document.getElementById('tipo_titular'), campo=document.getElementById('cliente-field'), cliente=document.getElementById('cliente_id'); function sync(){ const isCliente=tipo.value==='CLIENTE'; campo.style.display=isCliente?'grid':'none'; cliente.required=isCliente; if(!isCliente) cliente.value=''; } tipo.addEventListener('change',sync); sync(); })();
-</script>
-{% endblock %}
+</section>{% endblock %}

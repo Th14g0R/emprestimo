@@ -1,0 +1,44 @@
+name: Validar e empacotar v2
+on:
+  push:
+    branches: [release/v2]
+  pull_request:
+    branches: [release/v2]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  testes:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.14']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -r requirements.lock
+      - run: python -m unittest discover -s tests -v
+      - name: Validar sintaxe PowerShell
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem scripts/*.ps1 | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+          }
+  pacote:
+    needs: testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git archive --format=zip --prefix=emprestimo-v2/ --output=emprestimo-v2-${{ github.sha }}.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emprestimo-v2-${{ github.sha }}
+          path: emprestimo-v2-*.zip
+          retention-days: 14

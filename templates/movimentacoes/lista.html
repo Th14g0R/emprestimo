@@ -1,141 +1,17 @@
-{% extends "base.html" %}
-{% block title %}Movimentações{% endblock %}
-{% block content %}
-<div class="page-header">
-    <div>
-        <h1>Movimentações</h1>
-        <p class="muted">Histórico financeiro consolidado dos empréstimos.</p>
-    </div>
-    <a class="button" href="{{ url_for('pagamentos_integrados_novo') }}">Novo pagamento integrado</a>
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}Movimentações{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>Movimentações</h1>
 </div>
-
-<section class="card section-card">
-    <form class="filters filters-movements" method="get">
-        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, empréstimo, banco ou observação">
-
-        <select name="tipo">
-            <option value="todos" {{ 'selected' if tipo == 'todos' }}>Todos os tipos</option>
-            <option value="emprestimo" {{ 'selected' if tipo == 'emprestimo' }}>Empréstimo</option>
-            <option value="juros" {{ 'selected' if tipo == 'juros' }}>Juros</option>
-            <option value="abatimento" {{ 'selected' if tipo == 'abatimento' }}>Abatimento</option>
-            <option value="quitacao" {{ 'selected' if tipo == 'quitacao' }}>Quitação</option>
-        </select>
-
-        <label class="filter-date-label">
-            <span>De</span>
-            <input type="date" name="data_inicio" value="{{ data_inicio }}">
-        </label>
-
-        <label class="filter-date-label">
-            <span>Até</span>
-            <input type="date" name="data_fim" value="{{ data_fim }}">
-        </label>
-
-        <button class="button button-secondary" type="submit">Filtrar</button>
-        <a class="button button-light" href="{{ url_for('movimentacoes_lista') }}">Limpar</a>
-    </form>
-</section>
-
-<section class="card table-card movement-table-card">
-{% if movimentacoes %}
-<div class="table-responsive">
-<table class="movements-table">
-    <thead>
-        <tr>
-            <th>Data</th>
-            <th>Cliente / Contrato</th>
-            <th>Movimento</th>
-            <th class="text-right">Valor</th>
-            <th>Saldo</th>
-            <th>Fluxo financeiro</th>
-            <th>Detalhes</th>
-            <th>Ações</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for mov in movimentacoes %}
-        <tr>
-            <td class="movement-date nowrap">{{ mov['data_movimento']|date_br }}</td>
-
-            <td class="movement-client">
-                <a href="{{ url_for('clientes_detalhe', cliente_id=mov['cliente_id']) }}"><strong>{{ mov['cliente_nome'] }}</strong></a>
-                <div class="movement-subline">
-                    <a href="{{ url_for('emprestimos_detalhe', emprestimo_id=mov['emprestimo_id']) }}">Empréstimo #{{ mov['emprestimo_id'] }}</a>
-                </div>
-            </td>
-
-            <td class="movement-type">
-                <span class="badge badge-{{ mov['tipo']|lower }}">{{ mov['tipo'] }}</span>
-                {% if mov['tipo'] == 'JUROS' %}
-                    <div class="movement-subline">{{ mov['competencia']|competencia_br }}{% set datas = datas_titulo(mov, true) %}{% if datas %}<br><small>Venc.: {{ datas['data_vencimento']|date_br }}<br>Pagamento: {{ datas['data_recebimento']|date_br if datas['data_recebimento'] else '-' }}</small>{% endif %}</div>
-                {% endif %}
-            </td>
-
-            <td class="text-right movement-value nowrap"><strong>{{ mov['valor_centavos']|money }}</strong></td>
-
-            <td class="movement-balance">
-                {% if mov['saldo_antes_centavos'] is not none %}
-                    <div><small>Antes</small> <strong>{{ mov['saldo_antes_centavos']|money }}</strong></div>
-                {% endif %}
-                {% if mov['saldo_depois_centavos'] is not none %}
-                    <div><small>Depois</small> <strong>{{ mov['saldo_depois_centavos']|money }}</strong></div>
-                {% endif %}
-            </td>
-
-            <td class="movement-flow">
-                <div class="movement-account">
-                    <small>Origem</small>
-                    <strong>{{ mov['origem_banco'] or '-' }}</strong>
-                    {% if mov['origem_pix'] %}
-                        <span class="movement-pix" title="{{ mov['origem_pix'] }}">PIX {{ mov['origem_pix'] }}</span>
-                    {% endif %}
-                </div>
-                <div class="movement-flow-arrow">↓</div>
-                <div class="movement-account">
-                    <small>Destino</small>
-                    <strong>{{ mov['destino_banco'] or '-' }}</strong>
-                    {% if mov['destino_pix'] %}
-                        <span class="movement-pix" title="{{ mov['destino_pix'] }}">PIX {{ mov['destino_pix'] }}</span>
-                    {% endif %}
-                </div>
-            </td>
-
-            <td class="movement-details">
-                <div><small>Usuário</small> {{ mov['usuario_nome'] or '-' }}</div>
-                {% if mov['observacao'] %}
-                    <div class="movement-note">{{ mov['observacao'] }}</div>
-                {% endif %}
-                {% if mov['titulo_receber_id'] %}
-                    <a class="integrated-payment-link" href="{{ url_for('titulos_receber_detalhe', titulo_id=mov['titulo_receber_id']) }}">
-                        Título #{{ mov['titulo_receber_id'] }}
-                    </a>
-                {% endif %}
-                {% if mov['pagamento_integrado_id'] %}
-                    <a class="integrated-payment-link" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">
-                        Pagamento integrado #{{ mov['pagamento_integrado_id'] }}
-                    </a>
-                {% endif %}
-            </td>
-
-            <td class="movement-actions">
-                <div class="actions wrap-actions">
-                    {% if mov['pagamento_integrado_id'] %}
-                        <a class="button button-secondary button-small" href="{{ url_for('pagamentos_integrados_detalhe', pagamento_id=mov['pagamento_integrado_id']) }}">Abrir integrado</a>
-                    {% else %}
-                        <a class="button button-light button-small" href="{{ url_for('movimentacoes_editar', movimentacao_id=mov['id']) }}">Alterar</a>
-                        {% if mov['tipo'] != 'EMPRESTIMO' %}
-                            <a class="button button-danger button-small" href="{{ url_for('movimentacoes_excluir', movimentacao_id=mov['id']) }}">Excluir</a>
-                        {% endif %}
-                    {% endif %}
-                </div>
-            </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
+<div class="actions">
 </div>
-{% else %}
-<div class="empty-state">Nenhuma movimentação encontrada para os filtros informados.</div>
-{% endif %}
-</section>
-{% endblock %}
+</header>
+<section class="panel">
+<form method="get" class="filters">{{ field("q","Pesquisar",request.args.get("q","")) }}{{ field("data_inicio","De",request.args.get("data_inicio",""),type="date") }}{{ field("data_fim","Até",request.args.get("data_fim",""),type="date") }}<label class="field">
+<span>Movimento</span>
+<select name="tipo">{% for value,label in [('todos','Todos'),('juros','Juros'),('abatimento','Abatimento'),('quitacao','Quitação'),('emprestimo','Empréstimo')] %}<option value="{{ value }}" {% if tipo==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+</label>
+<button class="button">Filtrar</button>
+<a href="{{ request.path }}">Limpar</a>
+</form>{{ table(movimentacoes,[('data_movimento', 'Data'), ('cliente_nome', 'Cliente'), ('emprestimo_id', 'Contrato'), ('tipo', 'Tipo'), ('valor_centavos', 'Valor')],'movimentacoes_editar','movimentacao_id') }}</section>{% endblock %}

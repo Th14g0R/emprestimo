@@ -1,0 +1,10 @@
+{% extends 'base.html' %}{% from '_macros.html' import field, csrf, banks with context %}
+{% block title %}Receber juros{% endblock %}{% block content %}
+<header class="page-heading"><div><p class="eyebrow">CONTRATO #{{ emprestimo.id }}</p><h1>Receber juros</h1></div></header>
+<section class="panel"><h2>{{ emprestimo.cliente_nome }}</h2><p>Principal em aberto: {{ emprestimo.saldo_atual_centavos|money }}</p>
+<form method="post">{{ csrf() }}<div class="form-grid">{{ field('competencia','Competência',form.competencia,type='month',required=true) }}{{ field('data_movimento','Data efetiva do pagamento',form.data_movimento,type='date',required=true) }}</div>
+<button class="button" name="acao" value="prever" formnovalidate>Calcular para esta data</button>
+{% include 'receber/_atraso.html' %}<input type="hidden" name="assinatura" value="{{ assinatura }}">
+{{ banks(form,contas_cliente,contas_proprias) }}{{ field('observacao','Observação',form.observacao,type='textarea') }}
+{% if planos %}<button class="button primary" name="acao" value="confirmar">Confirmar recebimento de {{ resumo_atraso.valor_total_centavos|money }}</button>{% endif %}
+</form></section>{% endblock %}

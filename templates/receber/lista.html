@@ -1,159 +1,31 @@
-{% extends "base.html" %}
-{% block title %}A Receber
-{% endblock %}
-{% block content %}
-<div class="page-header">
-    <div>
-        <h1>A Receber</h1>
-        <p class="muted">Agenda de juros previstos, vencidos e recebidos.</p>
-    </div>
-
-    <div class="actions">
-        <a
-            class="button button-secondary"
-            href="{{ url_for('titulos_receber_relatorio') }}"
-        >
-            Relatório por cliente
-        </a>
-    </div>
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}A receber{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>A receber</h1>
 </div>
-
-<div class="receivable-period-grid">
-{% for key, periodo in periodos.items() %}
-    <section class="card period-card">
-        <div class="period-card-header">
-            <strong>{{ periodo['titulo'] }}</strong>
-            <small>{{ periodo['inicio']|date_br }} a {{ periodo['fim']|date_br }}</small>
-        </div>
-        <dl class="period-metrics">
-            <div><dt>Juros previstos</dt><dd>{{ periodo['resumo']['previsto_centavos']|money }}</dd></div>
-            <div><dt>Falta receber</dt><dd>{{ periodo['resumo']['pendente_centavos']|money }}</dd></div>
-            <div><dt>Juros recebidos</dt><dd>{{ periodo['resumo']['juros_recebidos_centavos']|money }}</dd></div>
-            <div><dt>Total recebido</dt><dd>{{ periodo['resumo']['total_recebido_centavos']|money }}</dd></div>
-        </dl>
-    </section>
-{% endfor %}
+<div class="actions">
+<a class="button primary" href="{{ url_for('pagamentos_integrados_novo') }}">Registrar pagamento</a>
 </div>
-
-<section class="card section-card">
-    <form class="filters filters-receivables" method="get">
-        <input type="search" name="q" value="{{ termo }}" placeholder="Cliente, empréstimo, competência ou observação">
-
-        <select name="emprestimo_id" aria-label="Filtrar por empréstimo">
-            <option value="">Todos os empréstimos</option>
-            {% for e in emprestimos_filtro %}<option value="{{ e.id }}" {{ 'selected' if emprestimo_filtro == e.id }}>#{{ e.id }} · {{ e.cliente_nome }}{% if e.descricao %} · {{ e.descricao }}{% endif %}</option>{% endfor %}
-        </select>
-        <select name="status">
-            <option value="abertos" {{ 'selected' if status == 'abertos' }}>Em aberto</option>
-            <option value="previsto" {{ 'selected' if status == 'previsto' }}>Pendentes</option>
-            <option value="vencido" {{ 'selected' if status == 'vencido' }}>Vencidos</option>
-            <option value="parcial" {{ 'selected' if status == 'parcial' }}>Parciais</option>
-            <option value="recebido" {{ 'selected' if status == 'recebido' }}>Recebidos</option>
-            <option value="cancelado" {{ 'selected' if status == 'cancelado' }}>Cancelados</option>
-            <option value="todos" {{ 'selected' if status == 'todos' }}>Todos</option>
-        </select>
-
-        <select name="periodo">
-            <option value="todos" {{ 'selected' if periodo_key == 'todos' }}>Atalho de período</option>
-            {% for key, periodo in periodos.items() %}
-                <option value="{{ key }}" {{ 'selected' if periodo_key == key }}>{{ periodo['titulo'] }}</option>
-            {% endfor %}
-        </select>
-
-        <label class="filter-date-label">
-            <span>De</span>
-            <input type="date" name="data_inicio" value="{{ data_inicio }}">
-        </label>
-
-        <label class="filter-date-label">
-            <span>Até</span>
-            <input type="date" name="data_fim" value="{{ data_fim }}">
-        </label>
-
-        <button class="button button-secondary" type="submit">Filtrar</button>
-        <a class="button button-light" href="{{ url_for('titulos_receber_lista') }}">Limpar</a>
-    </form>
-
-    <p class="filter-help">
-        Ao preencher Data inicial/final, o período manual tem prioridade sobre o atalho de semana/mês.
-    </p>
-</section>
-
-<section class="card table-card">
-{% if titulos %}
-<form method="post" action="{{ url_for('titulos_receber_lote') }}" id="lote" class="receivable-bulk-toolbar">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="button" type="submit">Alterar vencimentos dos selecionados</button>
-<label class="receivable-check"><input type="checkbox" id="selecionar-todos"> Selecionar todos em aberto</label>
+</header>
+<section class="panel">
+<form method="get" class="filters">{{ field("q","Pesquisar",request.args.get("q","")) }}<label class="field">
+<span>Situação</span>
+<select name="status">
+<option value="abertos" {% if request.args.get("status",'abertos')=='abertos' %}selected{% endif %}>Em aberto</option>
+<option value="vencido" {% if request.args.get("status",'abertos')=='vencido' %}selected{% endif %}>Vencidos</option>
+<option value="recebido" {% if request.args.get("status",'abertos')=='recebido' %}selected{% endif %}>Recebidos</option>
+<option value="parcial" {% if request.args.get("status",'abertos')=='parcial' %}selected{% endif %}>Parciais históricos</option>
+<option value="todos" {% if request.args.get("status",'abertos')=='todos' %}selected{% endif %}>Todos</option>
+</select>
+</label>{{ field("data_inicio","De",request.args.get("data_inicio",""),type="date") }}{{ field("data_fim","Até",request.args.get("data_fim",""),type="date") }}<button class="button">Filtrar</button>
+<a href="{{ request.path }}">Limpar</a>
+</form>{{ table(titulos,[('cliente_nome', 'Cliente'), ('emprestimo_id', 'Contrato'), ('competencia', 'Competência'), ('data_vencimento', 'Vencimento'), ('valor_previsto_centavos', 'Valor do título'), ('status', 'Situação')],'titulos_receber_detalhe','titulo_id') }}</section>
+<details class="panel">
+<summary>Reagendar títulos em aberto</summary>
+<form method="post" action="{{ url_for('titulos_receber_lote') }}">{{ csrf() }}<p class="muted">Selecione títulos para conferir a prévia antes de confirmar.</p>{% for t in titulos if t.status in ['PREVISTO','VENCIDO'] and t.natureza=='JUROS' %}<label class="check">
+<input type="checkbox" name="titulo_id" value="{{ t.id }}">#{{ t.id }} · {{ t.cliente_nome }} · {{ t.competencia|competencia_br }} · {{ t.data_vencimento|date_br }} · {{ t.valor_previsto_centavos|money }}</label>{% endfor %}<button class="button">Configurar reagendamento</button>
 </form>
-<div class="table-responsive">
-<table class="receivables-table" data-sortable="true">
-    <thead>
-        <tr>
-            <th class="receivable-selection">Selecionar</th><th>Vencimento</th>
-            <th>Cliente / Empréstimo</th>
-            <th>Competência</th>
-            <th>Documento</th>
-            <th class="text-right">Valor</th>
-            <th>Status</th>
-            <th>Recebido em</th>
-            <th>Observação</th>
-            <th>Ações</th>
-        </tr>
-    </thead>
-    <tbody>
-    {% for titulo in titulos %}
-        <tr>
-            <td class="receivable-selection">{% if titulo['status'] in ['PREVISTO', 'VENCIDO'] and titulo['natureza'] == 'JUROS' %}<input type="checkbox" form="lote" name="titulo_id" value="{{ titulo['id'] }}" aria-label="Selecionar título {{ titulo['id'] }}">{% endif %}</td>
-            <td class="nowrap">{{ titulo['data_vencimento']|date_br }}</td>
-            <td>
-                <a href="{{ url_for('clientes_detalhe', cliente_id=titulo['cliente_id']) }}">{{ titulo['cliente_nome'] }}</a>
-                <br>
-                <small><a href="{{ url_for('emprestimos_detalhe', emprestimo_id=titulo['emprestimo_id']) }}">Empréstimo #{{ titulo['emprestimo_id'] }}</a></small>
-            </td>
-            <td>{{ titulo['competencia']|competencia_br }}</td>
-            <td>
-                {% if titulo['natureza'] == 'SALDO_JUROS' %}
-                    <strong>Saldo de juros</strong>
-                    {% if titulo['titulo_origem_id'] %}<br><small>do título #{{ titulo['titulo_origem_id'] }}</small>{% endif %}
-                {% else %}
-                    Juros
-                {% endif %}
-            </td>
-            <td class="text-right nowrap">
-                <strong>{{ titulo['valor_previsto_centavos']|money }}</strong>
-                {% if titulo['status'] == 'PARCIAL' %}
-                    <br><small>recebido {{ titulo['valor_recebido_centavos']|money }}</small>
-                {% endif %}
-            </td>
-            <td><span class="badge badge-{{ titulo['status']|titulo_status|lower }}">{{ titulo['status']|titulo_status }}</span></td>
-            <td class="nowrap">{{ titulo['data_recebimento']|date_br if titulo['data_recebimento'] else '-' }}</td>
-            <td>{{ titulo['observacao'] or '-' }}</td>
-            <td>
-                <div class="actions wrap-actions">
-                    <a
-                        class="button button-small {{ 'button' if titulo['status'] in ['PREVISTO', 'VENCIDO'] else 'button-light' }}"
-                        href="{{ url_for('titulos_receber_detalhe', titulo_id=titulo['id']) }}"
-                    >
-                        {{ 'Receber' if titulo['status'] in ['PREVISTO', 'VENCIDO'] else 'Abrir' }}
-                    </a>
-
-                    {% if titulo['status'] in ['RECEBIDO', 'PARCIAL'] %}<a class="button button-danger button-small" href="{{ url_for('titulos_receber_estornar', titulo_id=titulo['id']) }}">Estornar</a>{% endif %}
-                    {% if titulo['status'] in ['PREVISTO', 'VENCIDO'] %}
-                        <a class="button button-light button-small" href="{{ url_for('titulos_receber_editar', titulo_id=titulo['id']) }}">Alterar</a>
-                        <a class="button button-danger button-small" href="{{ url_for('titulos_receber_excluir', titulo_id=titulo['id']) }}">Excluir</a>
-                        <a class="button button-secondary button-small" href="{{ url_for('pagamentos_integrados_novo', cliente_id=titulo['cliente_id']) }}">Integrado</a>
-                    {% endif %}
-                </div>
-            </td>
-        </tr>
-    {% endfor %}
-    </tbody>
-</table>
-</div>
-{% else %}
-<div class="empty-state">Nenhum título encontrado para os filtros informados.</div>
-{% endif %}
-</section>
-<script>document.getElementById('selecionar-todos')?.addEventListener('change', function () { document.querySelectorAll('input[name="titulo_id"]').forEach(c => c.checked = this.checked); });</script>
-{% endblock %}
+</details>
+<p class="muted">Até 500 títulos por consulta. Use os filtros para localizar um período específico.</p>
+<a href="{{ url_for('titulos_receber_relatorio') }}">Relatório de cobrança por cliente →</a>{% endblock %}

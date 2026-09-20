@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.pyo
 .venv/
+.venv-local/
+data/local-test/
 venv/
 
 # Ambiente / segredos
@@ -11,8 +13,6 @@ venv/
 !.env.example
 data/.secret_key
 *.secret_key
-*.pem
-*.key
 
 # Banco e arquivos SQLite
 data/emprestimos.db
@@ -38,4 +38,14 @@ backups/
 Thumbs.db
 
 # Mantém somente o diretório de dados versionável quando criado
+!data/.gitkeep
+
+# Saídas de build e dados privados em qualquer subdiretório
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+data/*
 !data/.gitkeep

@@ -1,126 +1,43 @@
-# Regras de Negócio Financeiras
+# Regras financeiras
 
-Este documento é normativo para o projeto.
+Este documento consolida as regras obrigatórias de `AGENTS.md`.
 
-## Reagendamento de vencimentos
+- Cada empréstimo pertence a um cliente e possui saldo independente.
+- Todo movimento de empréstimo deve conter `emprestimo_id`.
+- EMPRESTIMO constitui o principal. JUROS não altera o principal.
+- JUROS é integral por competência mensal. Não criar mais de um lançamento
+  JUROS para o mesmo empréstimo e competência.
+- ABATIMENTO reduz somente o principal do contrato selecionado e deve ser
+  menor que o saldo; QUITACAO corresponde ao saldo restante e encerra o contrato.
+- Contratos com saldo principal positivo permanecem ativos.
+- Dinheiro é representado por centavos inteiros; cálculos usam Decimal.
+- Desembolso: conta própria → conta do cliente. Recebimento: fluxo inverso.
+  Movimentos conservam snapshots de banco e PIX.
+- Correções financeiras exigem a senha do usuário logado e auditoria.
+- Migrações preservam registros existentes. Não apagar nem consolidar
+  automaticamente movimentos históricos divergentes.
+- Validação de saldo e gravação devem ocorrer na mesma transação, incluindo
+  todos os itens de um pagamento. Falha implica rollback.
 
-- Alterações em lote atingem somente títulos de juros em aberto e preservam a competência.
-- O acréscimo opcional de transição usa juros mensais sobre o saldo-base × dias corridos de adiamento / 30, com Decimal e arredondamento HALF_UP ao centavo no final.
-- O acréscimo integra o valor do primeiro título selecionado de cada empréstimo; não cria outro movimento JUROS nem altera o principal. Os demais títulos mantêm o valor.
-- A base comercial de 30 dias é uma convenção explícita do reagendamento, não uma determinação de taxa legal. Usar quando combinada entre as partes.
-- A prévia deve ser confirmada com senha do usuário atual e motivo. O lote é atômico e auditado. Recebidos, cancelados e saldos parciais não podem ser reagendados por esse fluxo.
-- Manter o novo dia mensal requer selecionar os títulos futuros em aberto já gerados. O novo dia também passa a valer para a geração posterior.
-- Estornar um recebimento reutiliza a correção auditada: reabre o título, limpa a baixa e conserva o registro financeiro anterior na auditoria. Recebimentos posteriores de saldos precisam ser desfeitos primeiro. Pagamentos integrados são desfeitos como um conjunto, com confirmação explícita na tela correspondente.
+## Divergência histórica
 
-## 1. Independência dos empréstimos
+A versão recebida remove a unicidade de JUROS para permitir recebimentos
+parciais. Essa implementação divergia da regra acima. A revisão local impede novos
+pagamentos parciais e novas duplicidades sem apagar histórico. Uma mudança
+da regra exige decisão explícita; não se deve apagar histórico para impor unicidade.
 
-Um cliente pode possuir vários empréstimos simultâneos. Cada contrato mantém saldo, taxa, movimentos e status próprios.
+## Atraso e reagendamento (regra explicitada pelo usuário)
 
-Nenhum pagamento deve ser lançado apenas contra o cliente; ele precisa indicar exatamente o empréstimo afetado.
-
-## 2. Principal
-
-`valor_original_centavos` representa o principal inicialmente emprestado.
-
-`saldo_atual_centavos` representa somente o principal ainda não abatido.
-
-## 3. Juros
-
-O juro mensal é calculado sobre o saldo principal vigente para a competência.
-
-Exemplo:
-
-```text
-Saldo: R$ 10.000,00
-Taxa: 5%
-Juros: R$ 500,00
-Saldo após juros: R$ 10.000,00
-```
-
-Regras:
-
-- juro não altera o saldo principal;
-- o pagamento de juros deve ser integral;
-- não fracionar o juro da mesma competência;
-- no máximo um movimento `JUROS` por empréstimo/competência;
-- após abatimento, o próximo juro usa o novo saldo.
-
-## 4. Abatimento
-
-Abatimento é pagamento parcial do principal.
-
-Pode existir mais de um abatimento na mesma competência/mês.
-
-Exemplo:
-
-```text
-Saldo inicial: R$ 10.000,00
-Abatimento 1: R$ 300,00
-Abatimento 2: R$ 700,00
-Saldo final: R$ 9.000,00
-```
-
-## 5. Quitação
-
-Quitação é o pagamento integral do saldo principal restante.
-
-Ao quitar:
-
-```text
-saldo_atual_centavos = 0
-status = QUITADO
-```
-
-Pagamento menor que o saldo é `ABATIMENTO`, não "quitação parcial".
-
-## 6. Status
-
-Em termos financeiros:
-
-```text
-saldo > 0  -> contrato em aberto
-saldo = 0  -> contrato quitado
-```
-
-O campo de status deve permanecer coerente com o saldo.
-
-## 7. Origem e destino bancário
-
-Empréstimo:
-
-```text
-origem  = conta própria
-destino = conta do cliente
-```
-
-Recebimentos de juros, abatimentos e quitação:
-
-```text
-origem  = conta do cliente
-destino = conta própria
-```
-
-Toda movimentação deve preservar o `conta_origem_id` e `conta_destino_id`, além do snapshot dos dados bancários relevantes para que alterações posteriores no cadastro não reescrevam a história.
-
-## 8. Dinheiro
-
-Todos os valores monetários são persistidos como número inteiro de centavos.
-
-```text
-R$ 1.234,56 -> 123456
-```
-
-Para entrada/conversão, usar `Decimal` quando necessário. Não persistir valores financeiros em `float`.
-
-## 9. Imutabilidade e correção
-
-Movimentações financeiras já lançadas não devem ser editadas nem removidas por padrão.
-
-Se existir no futuro uma função de correção:
-
-1. exigir a senha do usuário atualmente logado;
-2. validar a senha contra o hash armazenado;
-3. registrar valor anterior e novo valor em auditoria;
-4. registrar usuário, data/hora e motivo;
-5. recalcular os efeitos no contrato dentro de uma transação;
-6. nunca apagar silenciosamente o histórico original.
+- Adicional = valor original do juro mensal × dias corridos de atraso ÷ 30.
+  Usa Decimal e arredondamento HALF_UP apenas no adicional final em centavos.
+- Principal não é alterado. Não há capitalização do adicional de atraso.
+- Reagendar novamente recalcula desde a mesma data-base e sobre o mesmo valor
+  original; não soma o adicional antigo novamente.
+- O recebimento calcula até a data efetiva do pagamento, mesmo que tenha havido
+  reagendamento. Cada título do grupo tem seu próprio vencimento e atraso.
+- Títulos selecionados são recalculados. Com a opção de atualizar próximos,
+  títulos futuros não selecionados mudam apenas de dia, conservam o valor e
+  passam a usar esse novo vencimento como base; o dia do contrato é atualizado.
+- Valor original, data-base, dias, adicional e data de cálculo são conservados
+  no título e como snapshot na movimentação e nos itens de pagamento.
+- Recebimentos anteriores à atualização não recebem cobranças retroativas.

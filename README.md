@@ -1,80 +1,74 @@
-# Sistema de Controle de Empréstimos
+# Controle de Empréstimos — versão 2
 
-Aplicação web monolítica para controle de empréstimos pessoais e cartão de crédito.
+Versão **2.0.0+build.1**, mantida na branch **release/v2**.
+Sistema de uso real para empréstimos pessoais, recebimentos e cartão de crédito,
+com interface administrativa e portal do cliente. Não inclui dados demonstrativos
+nem usuário ou senha padrão.
 
-## Stack atual
+## Funcionalidades
 
-- Python 3.9+
-- Flask 3.1+
-- SQLite local
-- Jinja2 / HTML / CSS
-- Waitress para execução como serviço no Windows
-- openpyxl e ReportLab para relatórios
+- Clientes, contratos independentes, contas bancárias e snapshots históricos.
+- Juros mensais, abatimentos e quitação com valores em centavos inteiros.
+- Atraso proporcional: juro mensal original × dias de atraso ÷ 30.
+- Reagendamento e recebimentos agrupados com prévia detalhada, sem capitalizar
+  atraso nos títulos futuros.
+- Cartões, dashboard, relatórios, comprovantes privados e auditoria.
+- CSRF, senhas com hash, limites de tentativas e transações financeiras atômicas.
 
-O projeto **não usa Node.js, Docker, PostgreSQL, Next.js ou NestJS**.
+## Instalação no Windows
 
-## Execução para desenvolvimento
+Baixe a branch `release/v2` e execute **Gerenciar-Emprestimo.bat**. O gerenciador
+instala o serviço **Emprestimo**, com Waitress e SQLite, e acompanha somente essa
+branch. Para atualizar uma instalação anterior, use o gerenciador desta versão.
+
+Veja [instalação e atualização](docs/DEPLOYMENT_WINDOWS.md), incluindo backup,
+restauração e configuração de rede. O fluxo de serviço requer Windows; os testes
+Python também podem ser executados em outros sistemas.
+
+Para executar manualmente, em uma pasta de instalação:
 
 ```bat
-cd C:\temp\site\emprestimo
-python -m pip install -r requirements.txt
-python app.py
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.lock
+.venv\Scripts\waitress-serve.exe --listen=127.0.0.1:5000 --threads=4 wsgi:application
 ```
 
-Acesse `http://127.0.0.1:5000`.
+Abra `http://127.0.0.1:5000` para criar o primeiro administrador. Faça essa
+configuração localmente antes de disponibilizar o acesso a outros usuários.
 
-## Atualização manual no Windows
+## Dados e atualização
 
-Pare a aplicação antes de atualizar e faça backup de `data/` (incluindo banco,
-chave de sessão e comprovantes). No ambiente virtual usado pela aplicação:
+O padrão é `data/emprestimos.db`; comprovantes ficam em `data/comprovantes` e a
+chave da sessão em `data/.secret_key`. Migrações são incrementais. Banco, chave,
+comprovantes, backups e ambientes Python não fazem parte da publicação.
+
+Antes de restaurar um banco antigo, valide uma cópia:
 
 ```bat
-git pull --ff-only
-python -m pip install -r requirements.txt
-python -m pip check
-python -m unittest discover -s tests
-python app.py
+.venv\Scripts\python.exe scripts\verificar_banco.py C:\backup\emprestimos.db
 ```
 
-Use o mesmo interpretador para instalar as dependências e iniciar o sistema.
-`git reset --hard` descarta alterações locais e não instala dependências.
-Para instalações como serviço, prefira a atualização pelo gerenciador Windows.
-Os testes usam bancos temporários, sem acessar o banco de produção.
+Veja [compatibilidade e juros de atraso](docs/JUROS_ATRASO_E_RESTAURACAO.md).
+O arquivo `.env.example` documenta variáveis de ambiente; a aplicação não carrega
+arquivos `.env` automaticamente.
 
-## Produção no Windows
+## Desenvolvimento e validação
 
-Use `Gerenciar-Emprestimo.bat`. O gerenciador pode:
+Stack: Python 3.10+, Flask, SQLite, Jinja2, HTML/CSS, Pillow e Waitress.
+`requirements.txt` define intervalos compatíveis; `requirements.lock` fixa as
+versões validadas neste build.
 
-1. instalar dependências necessárias;
-2. clonar este repositório;
-3. criar ambiente virtual;
-4. instalar `requirements.txt`;
-5. instalar o site como serviço Windows chamado **Emprestimo**;
-6. atualizar a instalação comparando o commit local com `origin/main`;
-7. desinstalar o serviço e os arquivos, com opção de preservar o banco.
-
-Consulte [docs/DEPLOYMENT_WINDOWS.md](docs/DEPLOYMENT_WINDOWS.md).
-
-## Dados locais
-
-O SQLite fica em:
-
-```text
-data/emprestimos.db
+```sh
+python -m pip install -r requirements.lock
+python -m unittest discover -s tests -v
+python teste_local.py
 ```
 
-Esse banco pode conter dados pessoais, financeiros, bancos e chaves PIX. **Ele não deve ser enviado ao GitHub.** O arquivo `.gitignore` bloqueia banco, WAL, SHM e `data/.secret_key`.
+O servidor isolado usa `data/local-test` e porta 5001, sem inserir exemplos.
+Para desenvolvimento no banco configurado normalmente, use `python app.py`.
 
-## Documentação para desenvolvedores e IAs
-
-- [AGENTS.md](AGENTS.md) — contexto curto e regras obrigatórias para agentes de IA.
-- [docs/PROJECT_SPEC.md](docs/PROJECT_SPEC.md) — escopo funcional.
-- [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) — regras financeiras que não podem ser quebradas.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — arquitetura atual.
-- [docs/DEPLOYMENT_WINDOWS.md](docs/DEPLOYMENT_WINDOWS.md) — instalação, atualização e desinstalação.
-- [docs/GIT_BACKUP.md](docs/GIT_BACKUP.md) — publicação segura no GitHub.
-- [docs/ROADMAP.md](docs/ROADMAP.md) — próximos passos.
-
-## Regra de manutenção
-
-Mudanças de schema SQLite devem ser retrocompatíveis e preservar dados existentes. Nunca recrie o banco automaticamente para fazer uma atualização.
+- [Changelog](CHANGELOG.md)
+- [Arquitetura](docs/ARCHITECTURE.md)
+- [Regras financeiras](docs/BUSINESS_RULES.md)
+- [Espaço e manutenção](docs/RECURSOS_E_MANUTENCAO.md)
+- [Testes locais](docs/TESTE_LOCAL.md)

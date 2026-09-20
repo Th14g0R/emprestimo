@@ -1,1 +1,17 @@
-{% extends "portal/base.html" %}{% block title %}Acesso do cliente{% endblock %}{% block content %}<div class="auth-shell"><section class="card auth-card"><h1>Área do cliente</h1><p class="muted">Consulte seus contratos, títulos e comprovantes.</p><form method="post" class="form-grid"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>E-mail<input type="email" name="email" value="{{ email }}" required autocomplete="username"></label><label>Senha<input type="password" name="senha" required autocomplete="current-password"></label><button class="button" type="submit">Entrar</button></form><div class="auth-links"><a href="{{ url_for('portal.register') }}">Solicitar meu acesso</a><a href="{{ url_for('login') }}">Acesso administrativo</a></div></section></div>{% endblock %}
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}Acesse sua conta{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>Acesse sua conta</h1>
+</div>
+<div class="actions">
+</div>
+</header>
+<section class="panel auth-panel">
+<p class="muted">Consulte seus contratos e acompanhe seus pagamentos.</p>
+<form method="post">{{ csrf() }}{{ field('email','E-mail',request.form.get('email',''),type='email',required=true) }}{{ field('senha','Senha',type='password',required=true) }}<button class="button primary">Entrar</button>
+</form>
+<p>
+<a href="{{ url_for('portal.register') }}">Solicitar acesso</a>
+</p>
+</section>{% endblock %}

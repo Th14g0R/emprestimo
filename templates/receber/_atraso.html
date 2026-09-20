@@ -1,0 +1,16 @@
+{% if planos %}
+<div class="metrics three"><div><span>Juros originais</span><strong>{{ resumo_atraso.valor_base_centavos|money }}</strong></div><div><span>Adicional de atraso</span><strong>{{ resumo_atraso.juros_atraso_centavos|money }}</strong></div><div><span>Total do pagamento</span><strong>{{ resumo_atraso.valor_total_centavos|money }}</strong></div></div>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Título / contrato</th><th>Competência</th><th>Vencimento-base</th><th class="money">Juro original</th><th>Dias de atraso</th><th class="money">Adicional de atraso</th><th class="money">Total</th><th>Pagamento em</th></tr></thead>
+<tbody>{% for p in planos %}<tr>
+<td>{% if p.titulo_id %}#{{ p.titulo_id }} / {% endif %}Contrato #{{ p.emprestimo_id }}</td>
+<td>{{ p.competencia|competencia_br }}</td><td>{{ p.data_base_atraso|date_br }}</td>
+<td class="money">{{ p.valor_base_centavos|money }}</td><td>{{ p.dias_atraso }} dia(s)</td>
+<td class="money">{{ p.juros_atraso_centavos|money }}</td><td class="money"><strong>{{ p.valor_total_centavos|money }}</strong></td>
+<td>{{ p.data_calculo_atraso|date_br }}</td></tr>{% endfor %}</tbody>
+<tfoot><tr><th colspan="3">Total dos títulos selecionados</th><th class="money">{{ resumo_atraso.valor_base_centavos|money }}</th><th>—</th><th class="money">{{ resumo_atraso.juros_atraso_centavos|money }}</th><th class="money">{{ resumo_atraso.valor_total_centavos|money }}</th><th>Por título</th></tr></tfoot>
+</table>
+</div>
+<p class="muted">Adicional = juro original ÷ 30 × dias corridos de atraso. O arredondamento ocorre apenas no adicional final. O principal não muda.</p>
+{% endif %}

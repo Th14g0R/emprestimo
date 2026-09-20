@@ -92,6 +92,13 @@ def init_schema() -> None:
     CREATE INDEX IF NOT EXISTS idx_comprovantes_cliente ON comprovantes_pagamento(cliente_id);
     CREATE INDEX IF NOT EXISTS idx_comprovantes_itens_titulo ON comprovantes_pagamento_itens(titulo_receber_id);
     """)
+    from database import add_column_if_missing
+    for name, definition in (
+        ('valor_base_centavos','INTEGER'),('data_base_atraso','TEXT'),
+        ('dias_atraso','INTEGER NOT NULL DEFAULT 0'),
+        ('juros_atraso_centavos','INTEGER NOT NULL DEFAULT 0'),('data_calculo_atraso','TEXT'),
+    ):
+        add_column_if_missing(db,'comprovantes_pagamento_itens',name,definition)
     db.commit()
 
 
@@ -859,50 +866,8 @@ def proofs():
 @bp.route('/portal/comprovantes/novo',methods=['GET','POST'])
 @portal_required
 def new_proof():
-    db=get_db(); cid=int(g.portal_access['cliente_id']); sync_receivable_titles(db); titles=db.execute("""SELECT t.id,t.competencia,t.data_vencimento,t.valor_previsto_centavos,t.natureza,t.status,e.id emprestimo_id,e.descricao emprestimo_descricao FROM titulos_receber t JOIN emprestimos e ON e.id=t.emprestimo_id WHERE e.cliente_id=? AND t.status IN ('PREVISTO','VENCIDO') AND NOT EXISTS(SELECT 1 FROM comprovantes_pagamento_itens cpi JOIN comprovantes_pagamento cp ON cp.id=cpi.comprovante_id WHERE cpi.titulo_receber_id=t.id AND cp.status='EM_ANALISE') ORDER BY t.data_vencimento,e.id,t.id""",(cid,)).fetchall(); available={int(t['id']):t for t in titles}; form={'data_pagamento':request.form.get('data_pagamento',date.today().isoformat()),'observacao':request.form.get('observacao','')}; lines={i:request.form.get(f'valor_{i}',format_money(available[i]['valor_previsto_centavos']).replace('R$ ','')) for i in available}
-    if request.method=='POST':
-        selected=[]
-        for v in request.form.getlist('titulo_id'):
-            x=parse_int(v)
-            if x is not None and x not in selected: selected.append(x)
-        paydate=parse_iso_date(form['data_pagamento']); errors=[]; items=[]; keys=set()
-        if not selected: errors.append('Selecione pelo menos um título.')
-        if paydate is None: errors.append('Informe a data do pagamento.')
-        elif paydate>date.today(): errors.append('A data do pagamento não pode estar no futuro.')
-        for tid in selected:
-            t=available.get(tid)
-            if t is None: errors.append(f'O título #{tid} não está disponível.'); continue
-            key=(int(t['emprestimo_id']),str(t['competencia']))
-            if key in keys: errors.append('Selecione apenas um documento por empréstimo e competência.'); continue
-            keys.add(key); val=parse_money_to_centavos(request.form.get(f'valor_{tid}','')); saldo=int(t['valor_previsto_centavos'])
-            if val is None or val<=0: errors.append(f'Informe o valor pago no título #{tid}.')
-            elif val>saldo: errors.append(f'O valor do título #{tid} não pode superar {format_money(saldo)}.')
-            else: items.append({'titulo_id':tid,'valor_centavos':int(val)})
-        storage=request.files.get('comprovante'); fileinfo=None
-        if storage is None: errors.append('Anexe o comprovante de transferência.')
-        else:
-            try: fileinfo=validate_file(storage)
-            except ValueError as exc: errors.append(str(exc))
-        if errors:
-            for e in errors: flash(e,'danger')
-        else:
-            data,ext,mime,original=fileinfo; total=sum(i['valor_centavos'] for i in items); name=f'{uuid4().hex}{ext}'; path=PROOFS_DIR/name
-            try:
-                path.write_bytes(data); cur=db.execute("INSERT INTO comprovantes_pagamento(cliente_id,cliente_acesso_id,data_pagamento,valor_total_centavos,arquivo_nome,arquivo_original,mime_type,tamanho_bytes,status,observacao_cliente) VALUES(?,?,?,?,?,?,?,?,'EM_ANALISE',?)",(cid,g.portal_access['id'],paydate.isoformat(),total,name,original,mime,len(data),(form['observacao'].strip() or None))); pid=int(cur.lastrowid)
-                for i in items: db.execute("INSERT INTO comprovantes_pagamento_itens(comprovante_id,titulo_receber_id,valor_centavos) VALUES(?,?,?)",(pid,i['titulo_id'],i['valor_centavos']))
-                registrar_auditoria(db,'comprovante_pagamento',pid,'ENVIADO_PORTAL',json.dumps({'cliente_id':cid,'valor_total_centavos':total,'itens':items},ensure_ascii=False)); db.commit()
-            except Exception:
-                db.rollback()
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                current_app.logger.exception('Erro ao registrar comprovante do portal')
-                flash('Não foi possível registrar o comprovante. Nenhuma baixa foi realizada.','danger')
-            else:
-                flash('Comprovante enviado. Status: Pg. em análise.','success')
-                return redirect(url_for('portal.proofs'))
-    return render_template('portal/comprovante_form.html',titulos=titles,linhas=lines,form=form)
+    from portal_recebimentos import novo_comprovante
+    return novo_comprovante()
 
 
 @bp.get('/portal/comprovantes/<int:proof_id>/arquivo')
@@ -1149,11 +1114,8 @@ def admin_proofs():
 
 @bp.get('/comprovantes/<int:pid>')
 def admin_proof(pid):
-    r=_admin_required();
-    if r: return r
-    db=get_db(); cp=db.execute("SELECT cp.*,c.nome cliente_nome FROM comprovantes_pagamento cp JOIN clientes c ON c.id=cp.cliente_id WHERE cp.id=?",(pid,)).fetchone();
-    if cp is None: abort(404)
-    items=db.execute("""SELECT cpi.titulo_receber_id,cpi.valor_centavos,t.competencia,t.data_vencimento,t.valor_previsto_centavos,t.status,t.natureza,e.id emprestimo_id,e.descricao emprestimo_descricao FROM comprovantes_pagamento_itens cpi JOIN titulos_receber t ON t.id=cpi.titulo_receber_id JOIN emprestimos e ON e.id=t.emprestimo_id WHERE cpi.comprovante_id=? ORDER BY t.data_vencimento,e.id,t.id""",(pid,)).fetchall(); return render_template('portal_admin/comprovante_detalhe.html',comprovante=cp,itens=items,contas_cliente=get_client_accounts(cp['cliente_id']),contas_proprias=get_own_accounts())
+    from portal_recebimentos import detalhe_comprovante
+    return detalhe_comprovante(pid)
 
 
 @bp.get('/comprovantes/<int:pid>/arquivo')
@@ -1169,38 +1131,8 @@ def admin_file(pid):
 
 @bp.post('/comprovantes/<int:pid>/confirmar')
 def confirm_proof(pid):
-    r=_admin_required();
-    if r: return r
-    db=get_db(); cp=db.execute("SELECT cp.*,c.nome cliente_nome FROM comprovantes_pagamento cp JOIN clientes c ON c.id=cp.cliente_id WHERE cp.id=?",(pid,)).fetchone();
-    if cp is None: abort(404)
-    if cp['status']!='EM_ANALISE': flash('Este comprovante já foi analisado.','warning'); return redirect(url_for('portal.admin_proof',pid=pid))
-    origin=parse_int(request.form.get('conta_origem_id')); dest=parse_int(request.form.get('conta_destino_id')); obs=request.form.get('observacao_admin','').strip(); errors=[]
-    if not validar_senha_usuario_atual(request.form.get('senha_confirmacao')): errors.append('Senha de confirmação inválida.')
-    errors.extend(validate_money_flow_accounts(cp['cliente_id'],origin,dest,is_loan_disbursement=False))
-    items=db.execute("SELECT cpi.titulo_receber_id,cpi.valor_centavos,t.emprestimo_id,t.competencia,t.status,t.valor_previsto_centavos,t.saldo_base_centavos FROM comprovantes_pagamento_itens cpi JOIN titulos_receber t ON t.id=cpi.titulo_receber_id WHERE cpi.comprovante_id=? ORDER BY cpi.id",(pid,)).fetchall(); total=0; keys=set()
-    for i in items:
-        total+=int(i['valor_centavos']); key=(int(i['emprestimo_id']),str(i['competencia']))
-        if key in keys:
-            errors.append('Há mais de um título da mesma competência para o mesmo empréstimo.')
-        else:
-            keys.add(key)
-        if i['status'] not in {'PREVISTO','VENCIDO'}: errors.append(f"O título #{i['titulo_receber_id']} não está mais em aberto.")
-        if int(i['valor_centavos'])>int(i['valor_previsto_centavos']): errors.append(f"O valor do título #{i['titulo_receber_id']} supera o saldo atual.")
-    if total!=int(cp['valor_total_centavos']): errors.append('A soma dos títulos não corresponde ao comprovante.')
-    if errors:
-        [flash(e,'danger') for e in errors]; return redirect(url_for('portal.admin_proof',pid=pid))
-    ob,op,dbank,dp=get_account_snapshots(origin,dest)
-    try:
-        cur=db.execute("INSERT INTO pagamentos_integrados(cliente_id,data_pagamento,valor_total_centavos,conta_origem_id,conta_destino_id,origem_banco_snapshot,origem_pix_snapshot,destino_banco_snapshot,destino_pix_snapshot,observacao,usuario_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",(cp['cliente_id'],cp['data_pagamento'],cp['valor_total_centavos'],origin,dest,ob,op,dbank,dp,f'Comprovante portal #{pid}'+(f' — {obs}' if obs else ''),g.usuario['id'])); payid=int(cur.lastrowid)
-        for i in items:
-            tid=int(i['titulo_receber_id']); val=int(i['valor_centavos']); curm=db.execute("""INSERT INTO movimentacoes_emprestimo(emprestimo_id,tipo,data_movimento,valor_centavos,observacao,competencia,usuario_id,saldo_antes_centavos,saldo_depois_centavos,conta_origem_id,conta_destino_id,origem_banco_snapshot,origem_pix_snapshot,destino_banco_snapshot,destino_pix_snapshot,pagamento_integrado_id,titulo_receber_id) VALUES(?,'JUROS',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(i['emprestimo_id'],cp['data_pagamento'],val,f'Comprovante portal #{pid}',i['competencia'],g.usuario['id'],i['saldo_base_centavos'],i['saldo_base_centavos'],origin,dest,ob,op,dbank,dp,payid,tid)); mid=int(curm.lastrowid)
-            db.execute("INSERT INTO pagamentos_integrados_itens(pagamento_integrado_id,emprestimo_id,tipo,competencia,valor_centavos,saldo_base_centavos,movimentacao_id,titulo_receber_id,origem_item) VALUES(?,?,'JUROS',?,?,?,?,?,'TITULO')",(payid,i['emprestimo_id'],i['competencia'],val,i['saldo_base_centavos'],mid,tid)); aplicar_recebimento_titulo(db,titulo_id=tid,valor_recebido_centavos=val,movimentacao_id=mid,data_recebimento=date.fromisoformat(cp['data_pagamento']),observacao=f'Comprovante portal #{pid}')
-        db.execute("UPDATE comprovantes_pagamento SET status='CONFIRMADO',observacao_admin=?,pagamento_integrado_id=?,analisado_at=CURRENT_TIMESTAMP,analisado_por_usuario_id=? WHERE id=?",(obs or None,payid,g.usuario['id'],pid)); registrar_auditoria(db,'comprovante_pagamento',pid,'CONFIRMADO_E_BAIXADO',json.dumps({'pagamento_integrado_id':payid,'valor_total_centavos':total},ensure_ascii=False)); db.commit(); flash('Comprovante confirmado e títulos baixados.','success')
-    except Exception:
-        db.rollback()
-        current_app.logger.exception('Erro ao confirmar comprovante do cliente')
-        flash('A baixa não foi concluída. Nenhuma movimentação foi confirmada.','danger')
-    return redirect(url_for('portal.admin_proof',pid=pid))
+    from portal_recebimentos import confirmar_comprovante
+    return confirmar_comprovante(pid)
 
 
 @bp.post('/comprovantes/<int:pid>/rejeitar')

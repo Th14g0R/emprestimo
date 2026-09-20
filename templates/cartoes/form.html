@@ -1,6 +1,13 @@
-{% extends "base.html" %}
-{% block title %}Novo cartão{% endblock %}
-{% block content %}
-<div class="page-header"><div><h1>Novo cartão</h1><p class="muted">O cartão é controlado separadamente dos contratos de empréstimo.</p></div></div>
-<form method="post" class="card section-card"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="form-grid form-grid-2"><label>Cliente<select name="cliente_id" required><option value="">Selecione...</option>{% for cliente in clientes %}<option value="{{ cliente['id'] }}" {{ 'selected' if form['cliente_id']|string == cliente['id']|string }}>{{ cliente['nome'] }}</option>{% endfor %}</select></label><label>Nome do cartão<input name="descricao" value="{{ form['descricao'] }}" maxlength="120" required placeholder="Ex.: Nubank final 1234"></label><label>Dia de vencimento<input type="number" name="dia_vencimento" min="1" max="31" value="{{ form['dia_vencimento'] }}" required placeholder="Ex.: 10"></label></div><div class="form-actions"><a class="button button-light" href="{{ url_for('cartoes_lista') }}">Cancelar</a><button class="button" type="submit">Cadastrar cartão</button></div></form>
-{% endblock %}
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}Novo cartão{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>Novo cartão</h1>
+</div>
+<div class="actions">
+</div>
+</header>
+<section class="panel">
+<form method="post">{{ csrf() }}{{ select('cliente_id','Cliente',clientes,form.cliente_id) }}{{ field('descricao','Nome do cartão',form.descricao,required=true) }}{{ field('dia_vencimento','Dia do vencimento (1 a 31)',form.dia_vencimento,type='number',required=true) }}<button class="button primary">Salvar cartão</button>
+</form>
+</section>{% endblock %}

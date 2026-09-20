@@ -1,0 +1,30 @@
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
+{% macro field(name,label,value='',type='text',required=false) %}<label class="field" for="{{ name }}">
+<span>{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</span>{% if type=='textarea' %}<textarea id="{{ name }}" name="{{ name }}" {% if required %}required{% endif %}>{{ value or '' }}</textarea>{% else %}<input id="{{ name }}" name="{{ name }}" type="{{ type }}" value="{{ '' if type=='password' else (value if value is not none else '') }}" {% if required %}required{% endif %} {% if type=='password' %}autocomplete="{{ 'current-password' if name in ['senha','senha_confirmacao'] else 'new-password' }}"{% endif %} {% if name in ['valor','valor_original','valor_total','valor_recebido','valor_previsto'] %}inputmode="decimal" placeholder="0,00"{% endif %}>{% endif %}</label>{% endmacro %}
+{% macro select(name,label,rows,value='',key='id',text='nome',required=true) %}<label class="field" for="{{ name }}">
+<span>{{ label }}</span>
+<select name="{{ name }}" id="{{ name }}" {% if required %}required{% endif %}>
+<option value="">Selecione</option>{% for r in rows %}<option value="{{ r[key] }}" {% if r[key]|string==value|string %}selected{% endif %}>{{ r[text] }}{% if text=='banco' %} · {{ r.chave_pix or r.conta or r.descricao or 'Sem PIX' }}{% endif %}</option>{% endfor %}</select>
+</label>{% endmacro %}
+{% macro banks(form,origin,destination) %}<fieldset>
+<legend>Fluxo bancário</legend>
+<p class="muted">Confira a conta de origem e a conta de destino antes de confirmar.</p>
+<div class="form-grid">{{ select('conta_origem_id','Conta de origem',origin,form.conta_origem_id,text='banco') }}{{ select('conta_destino_id','Conta de destino',destination,form.conta_destino_id,text='banco') }}</div>
+</fieldset>{% endmacro %}
+{% macro table(rows,columns,endpoint='',param='id',empty='Nenhum registro encontrado.',id_key='id') %}<div class="table-wrap">
+<table>
+<thead>
+<tr>{% for key,label in columns %}<th scope="col" class="{{ 'money' if key.endswith('_centavos') else '' }}">{{ label }}</th>{% endfor %}{% if endpoint %}<th scope="col">Ação</th>{% endif %}</tr>
+</thead>
+<tbody>{% for row in rows %}<tr>{% for key,label in columns %}<td class="{{ 'money' if key.endswith('_centavos') else '' }}">{% if key.endswith('_centavos') %}{{ row[key]|money if row[key] is not none else '—' }}{% elif key in ['status','tipo','natureza'] %}<span class="badge {{ row[key]|lower }}">{{ row[key]|titulo_status if key=='status' else row[key] }}</span>{% elif key.startswith('data_') or key=='vencimento' %}{{ row[key]|date_br }}{% elif key=='competencia' %}{{ row[key]|competencia_br }}{% else %}{{ row[key] if row[key] is not none else '—' }}{% endif %}</td>{% endfor %}{% if endpoint %}<td>
+<a href="{{ url_for(endpoint,**{param:row[id_key]}) }}">Abrir <span class="sr-only">registro {{ row[id_key] }}</span>→</a>
+</td>{% endif %}</tr>{% else %}<tr>
+<td colspan="{{ columns|length + (1 if endpoint else 0) }}">
+<div class="empty">{{ empty }}</div>
+</td>
+</tr>{% endfor %}</tbody>
+</table>
+</div>{% endmacro %}
+{% macro confirmation(reason='motivo_alteracao') %}<fieldset>
+<legend>Confirmação da alteração</legend>
+<p class="muted">A alteração ficará registrada na auditoria.</p>{{ field(reason,'Motivo',request.form.get(reason,''),required=true) }}{{ field('senha_confirmacao','Sua senha atual',type='password',required=true) }}</fieldset>{% endmacro %}

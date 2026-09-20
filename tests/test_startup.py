@@ -42,11 +42,14 @@ assert len(created) == 1, len(created)
 assert 'portal' in application.blueprints
 client = application.test_client()
 assert client.get('/').status_code == 302
+assert client.get('/health').json['version'] == '2.0.0+build.1'
 assert client.get('/login', follow_redirects=True).status_code == 200
 with application.app_context():
     from app import get_db
     assert get_db().execute('PRAGMA foreign_keys').fetchone()[0] == 1
     assert get_db().execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+    assert get_db().execute('SELECT COUNT(*) FROM clientes').fetchone()[0] == 0
+    assert get_db().execute('SELECT COUNT(*) FROM emprestimos').fetchone()[0] == 0
     from werkzeug.security import generate_password_hash
     get_db().execute('INSERT INTO usuarios(nome, login, senha_hash) VALUES (?, ?, ?)',
                      ('Teste', 'teste', generate_password_hash('test-only')))
@@ -55,3 +58,20 @@ assert client.get('/login').status_code == 200
 """], cwd=ROOT, env=env, capture_output=True, text=True, timeout=60,
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_windows_service_runner_imports_production_app(self):
+        source = (ROOT / 'scripts/Gerenciar-Emprestimo.ps1').read_text(encoding='utf-8-sig')
+        runner = source.split("$runner = @'\n", 1)[1].split("\n'@", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = root / 'service'
+            service.mkdir()
+            script = service / 'service_runner.py'
+            script.write_text(runner)
+            env = dict(os.environ, PYTHONPATH=str(ROOT), EMPRESTIMO_DATA_DIR=str(root / 'data'),
+                       EMPRESTIMO_DATABASE=str(root / 'data/test.db'),
+                       EMPRESTIMO_SECRET_KEY_FILE=str(root / 'data/.secret_key'))
+            result = subprocess.run([sys.executable, str(script), '--check'], cwd=ROOT,
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('OK', result.stdout)

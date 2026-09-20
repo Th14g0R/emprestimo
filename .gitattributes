@@ -1,0 +1,11 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+.github/ export-ignore
+tests/ export-ignore
+teste_local.py export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore

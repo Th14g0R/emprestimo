@@ -1,36 +1,17 @@
-{% extends "base.html" %}
-{% block title %}Configuração inicial{% endblock %}
-{% block content %}
-<div class="auth-wrapper">
-    <section class="card auth-card">
-        <h1>Configuração inicial</h1>
-        <p class="muted">Crie o primeiro usuário administrador do sistema.</p>
-
-        <form method="post" class="form-grid">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-            <label>
-                Nome
-                <input type="text" name="nome" maxlength="120" required autofocus value="{{ nome|default('') }}">
-            </label>
-
-            <label>
-                Login
-                <input type="text" name="login" maxlength="60" required autocomplete="username" value="{{ login|default('') }}">
-            </label>
-
-            <label>
-                Senha
-                <input type="password" name="senha" minlength="8" required autocomplete="new-password">
-            </label>
-
-            <label>
-                Confirmar senha
-                <input type="password" name="confirmar_senha" minlength="8" required autocomplete="new-password">
-            </label>
-
-            <button class="button" type="submit">Criar administrador</button>
-        </form>
-    </section>
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}Configure seu acesso{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>Configure seu acesso</h1>
 </div>
-{% endblock %}
+<div class="actions">
+</div>
+</header>
+<section class="panel auth-panel">
+<p class="muted">Organize contratos, recebimentos e clientes em um só lugar.</p>
+<form method="post">{{ csrf() }}{{ field('nome','Seu nome',request.form.get('nome',''),required=true) }}{{ field('login','Login',request.form.get('login',''),required=true) }}{{ field('senha','Senha (mínimo 8 caracteres)',type='password',required=true) }}{{ field('confirmar_senha','Confirme a senha',type='password',required=true) }}<button class="button primary">Criar administrador</button>
+</form>
+<p>
+<a href="{{ url_for('portal.login') }}">Sou cliente →</a>
+</p>
+</section>{% endblock %}

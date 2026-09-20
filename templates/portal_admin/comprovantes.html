@@ -1,1 +1,22 @@
-{% extends "base.html" %}{% block title %}Portal - Comprovantes{% endblock %}{% block content %}<div class="page-header"><div><h1>Comprovantes</h1><p class="muted">Pagamentos enviados pelos clientes.</p></div><a class="button button-secondary" href="{{ url_for('portal.admin_accesses') }}">Acessos</a></div><section class="card section-card"><form method="get" class="filters"><select name="status"><option value="em_analise">Pg. em análise</option><option value="confirmado">Confirmados</option><option value="rejeitado">Rejeitados</option><option value="todos">Todos</option></select><button class="button button-secondary">Filtrar</button></form></section><section class="card section-card"><div class="table-responsive"><table data-sortable="true"><thead><tr><th>Enviado</th><th>Cliente</th><th>Data pagamento</th><th class="text-right">Valor</th><th>Status</th><th></th></tr></thead><tbody>{% for c in comprovantes %}<tr><td>{{ c['created_at']|date_br }}</td><td>{{ c['cliente_nome'] }}</td><td>{{ c['data_pagamento']|date_br }}</td><td class="text-right">{{ c['valor_total_centavos']|money }}</td><td>{{ c['status']|comprovante_status }}</td><td><a class="button button-small" href="{{ url_for('portal.admin_proof',pid=c['id']) }}">Abrir</a></td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}{% from '_macros.html' import field, select, table, csrf, banks, confirmation with context %}
+{% block title %}Comprovantes para análise{% endblock %}{% block content %}<header class="page-heading">
+<div>
+<p class="eyebrow">CONTROLE FINANCEIRO</p>
+<h1>Comprovantes para análise</h1>
+</div>
+<div class="actions">
+</div>
+</header>
+<section class="panel">
+<form method="get" class="filters">{{ field("q","Pesquisar",request.args.get("q","")) }}<label class="field">
+<span>Situação</span>
+<select name="status">
+<option value="EM_ANALISE" {% if request.args.get("status",'EM_ANALISE')=='EM_ANALISE' %}selected{% endif %}>Em análise</option>
+<option value="CONFIRMADO" {% if request.args.get("status",'EM_ANALISE')=='CONFIRMADO' %}selected{% endif %}>Confirmado</option>
+<option value="REJEITADO" {% if request.args.get("status",'EM_ANALISE')=='REJEITADO' %}selected{% endif %}>Rejeitado</option>
+<option value="" {% if request.args.get("status",'EM_ANALISE')=='' %}selected{% endif %}>Todos</option>
+</select>
+</label>
+<button class="button">Filtrar</button>
+<a href="{{ request.path }}">Limpar</a>
+</form>{{ table(comprovantes,[('id', 'Comprovante'), ('cliente_nome', 'Cliente'), ('data_pagamento', 'Pagamento'), ('valor_total_centavos', 'Valor'), ('status', 'Situação')],'portal.admin_proof','pid') }}</section>{% endblock %}

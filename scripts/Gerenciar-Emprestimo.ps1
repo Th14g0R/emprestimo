@@ -20,9 +20,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Script:InstallerVersion = '17.0-exact-git-sync'
+$Script:InstallerVersion = '2.0.0+build.1'
 $Script:RepoUrl = 'https://github.com/Th14g0R/emprestimo.git'
-$Script:Branch = 'main'
+$Script:Branch = 'release/v2'
 $Script:ServiceName = 'Emprestimo'
 $Script:RegistryPath = 'HKLM:\SOFTWARE\Emprestimo'
 $Script:DefaultInstallPath = Join-Path $env:ProgramData 'Emprestimo'
@@ -771,14 +771,14 @@ function Install-PythonRequirements {
 
     Write-Step 'Instalando/atualizando dependências do projeto...'
 
-    & $venvPython -m pip install -r (Join-Path $Path 'requirements.txt')
+    & $venvPython -m pip install -r (Join-Path $Path 'requirements.lock')
 
     if ($LASTEXITCODE -ne 0) {
-        throw 'Falha ao instalar requirements.txt.'
+        throw 'Falha ao instalar requirements.lock.'
     }
 
     # Validação objetiva das dependências necessárias ao serviço.
-    & $venvPython -c 'import flask,waitress,openpyxl,reportlab; from PIL import Image, ImageOps'
+    & $venvPython -c 'import flask,waitress; from PIL import Image, ImageOps'
 
     if ($LASTEXITCODE -ne 0) {
         throw 'O ambiente virtual foi criado, mas uma ou mais dependências Python não podem ser importadas.'
@@ -995,7 +995,7 @@ function Write-ServiceConfig {
   <logpath>%BASE%\..\logs</logpath>
   <log mode="roll-by-size">
     <sizeThreshold>10240</sizeThreshold>
-    <keepFiles>10</keepFiles>
+    <keepFiles>5</keepFiles>
   </log>
 </service>
 "@
@@ -1545,7 +1545,7 @@ function Show-EmprestimoCodeVerification {
     }
 
     Write-Step 'Atualizando referências do GitHub...'
-    & $git -C $path fetch origin $Script:Branch --prune
+    & $git -C $path fetch origin "+refs/heads/$($Script:Branch):refs/remotes/origin/$($Script:Branch)" --prune
     if ($LASTEXITCODE -ne 0) {
         throw 'Falha no git fetch.'
     }
@@ -1659,7 +1659,7 @@ function Update-Emprestimo {
 
     Write-Step 'Consultando repositório remoto...'
 
-    & $git -C $path fetch origin $Script:Branch --prune
+    & $git -C $path fetch origin "+refs/heads/$($Script:Branch):refs/remotes/origin/$($Script:Branch)" --prune
     if ($LASTEXITCODE -ne 0) {
         throw 'Falha no git fetch.'
     }
