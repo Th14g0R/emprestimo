@@ -1,6 +1,6 @@
 # Instalação e atualização da versão 2 no Windows
 
-Versão 2.0.0+build.1, branch `release/v2`, serviço `Emprestimo`.
+Versão 2.1.0+build.2, branch `release/v2`, serviço `Emprestimo`.
 O gerenciador e o bootstrap desta branch usam `release/v2`, sem publicar ou
 incorporar mudanças na `main`.
 
@@ -36,7 +36,7 @@ Não execute o `.bat` de dentro do ZIP nem misture arquivos da `main` com a v2.
    que escolheu. Crie o primeiro administrador antes de liberar acesso externo.
    Não existe senha padrão ou geração de exemplos. Em banco restaurado, use
    um usuário já existente.
-4. Confira `http://127.0.0.1:5000/health`: a versão inicial é `2.0.0+build.1`.
+4. Confira `http://127.0.0.1:5000/health`: a versão inicial é `2.1.0+build.2`.
 
 O serviço continua executando depois de fechar o gerenciador e inicia com o
 Windows. Em PowerShell **como administrador**, consulte ou controle assim:

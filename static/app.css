@@ -148,3 +148,5 @@ h1{font-size:26px}
 @media(max-width:700px){.sidebar-footer{display:flex;align-items:center;justify-content:space-between;padding-top:8px}
 .sidebar-footer form{margin:0}
 }
+
+.version-footer { padding: 0.75rem 1.5rem; color: #66766e; font-size: 0.75rem; text-align: right; }

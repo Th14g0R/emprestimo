@@ -29,9 +29,10 @@
 <main id="conteudo" class="{{ 'workspace' if g.usuario or g.portal_access else 'public' }}">
 <div class="topbar">
 <span>{{ 'Portal do cliente' if portal_area else 'Gestão de empréstimos e cartões' }}</span>
-<span>v{{ app_version }} · {{ hoje|date_br }}</span>
+<span>{{ hoje|date_br }}</span>
 </div>
 <div class="content">{% with messages=get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<div class="alert {{ category }}" role="alert">{{ message }}</div>{% endfor %}{% endwith %}{% block content %}{% endblock %}</div>
+<footer class="version-footer">Empréstimo · v{{ app_version }}</footer>
 </main>
 </body>
 </html>

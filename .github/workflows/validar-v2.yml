@@ -11,7 +11,7 @@ jobs:
   testes:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ['3.11', '3.14']
     runs-on: ${{ matrix.os }}
     steps:

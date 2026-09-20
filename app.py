@@ -34,7 +34,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
-APP_VERSION = "2.0.0+build.1"
+from version import APP_VERSION
 
 
 BASE_DIR = Path(__file__).resolve().parent

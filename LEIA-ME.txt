@@ -1,8 +1,9 @@
-CONTROLE DE EMPRESTIMOS — 2.0.0+build.1
+CONTROLE DE EMPRESTIMOS — 2.1.0+build.2
 Branch oficial desta versão: release/v2
 
 Instalação Windows: execute Gerenciar-Emprestimo.bat desta versão.
-Instalação macOS: siga docs/DEPLOYMENT_MACOS.md.
+Instalação macOS: bash Gerenciar-Emprestimo.command
+Guia de produção e importação v1: docs/PRODUCAO_MACOS.md.
 Instalação Linux: siga docs/DEPLOYMENT_LINUX.md.
 Visão geral e backups: docs/INSTALACAO.md.
 O serviço chama-se Emprestimo e utiliza Waitress, Flask e SQLite.

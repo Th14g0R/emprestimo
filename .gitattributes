@@ -9,3 +9,4 @@ tests/ export-ignore
 teste_local.py export-ignore
 .gitignore export-ignore
 .gitattributes export-ignore
+*.command text eol=lf

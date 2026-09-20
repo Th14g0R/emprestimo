@@ -1,18 +1,19 @@
 # Instalação e operação — Windows, Linux e macOS
 
-A versão **2.0.0+build.1** está na branch **release/v2**. O sistema é uma aplicação
+A versão **2.1.0+build.2** está na branch **release/v2**. O sistema é uma aplicação
 web: você instala o servidor em um computador e o utiliza pelo navegador.
 Não é necessário instalar Node.js, Docker ou outro banco de dados.
 
 | Sistema | Instalação | Execução automática |
 | --- | --- | --- |
 | [Windows](DEPLOYMENT_WINDOWS.md) | Gerenciador `.bat` / PowerShell ou instalação manual | Serviço `Emprestimo`, Waitress + WinSW |
-| [macOS](DEPLOYMENT_MACOS.md) | Terminal, Python e ambiente virtual | LaunchAgent ao fazer login |
+| [macOS](PRODUCAO_MACOS.md) | Gerenciador `.command` ou alternativa manual | LaunchAgent ao fazer login |
 | [Linux](DEPLOYMENT_LINUX.md) | Terminal; exemplo de pacotes Ubuntu/Debian | Serviço de usuário systemd, com opção de iniciar no boot |
 
 Siga **somente o guia do seu sistema**. O mesmo código usa Waitress e SQLite nos
-três casos. A instalação automática por interface de menu está disponível
-apenas no Windows; os outros guias trazem os comandos equivalentes.
+três casos. Windows e macOS têm gerenciadores por menu. O guia Linux traz os comandos
+equivalentes. No gerenciador Mac, a porta padrão é 5002 e os dados ficam
+separados do código; siga os caminhos específicos daquele guia.
 
 ## O que preparar
 

@@ -1,4 +1,8 @@
-# Instalação da versão 2 no macOS
+# Instalação manual da versão 2 no macOS
+
+Para instalação guiada com atualização e importação da v1, prefira o
+[gerenciador de produção para Mac](PRODUCAO_MACOS.md). Este guia é a alternativa
+manual e usa diretórios/porta diferentes; não misture as duas configurações.
 
 Este guia instala o sistema para uso real, na branch `release/v2`, sem dados
 fictícios. Funciona com o mesmo Flask, Waitress e SQLite da versão Windows.

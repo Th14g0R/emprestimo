@@ -1,6 +1,6 @@
 # Controle de Empréstimos — versão 2
 
-Versão **2.0.0+build.1**, mantida na branch **release/v2**.
+Versão **2.1.0+build.2**, mantida na branch **release/v2**.
 Sistema de uso real para empréstimos pessoais, recebimentos e cartão de crédito,
 com interface administrativa e portal do cliente. Não inclui dados demonstrativos
 nem usuário ou senha padrão.
@@ -20,14 +20,22 @@ nem usuário ou senha padrão.
 | Sistema | Guia completo | Como executar |
 | --- | --- | --- |
 | Windows | [Instalar no Windows](docs/DEPLOYMENT_WINDOWS.md) | Gerenciador `.bat` ou Waitress manual; serviço Windows |
-| macOS | [Instalar no Mac](docs/DEPLOYMENT_MACOS.md) | Terminal; início automático opcional ao fazer login |
+| macOS | [Produção no Mac e gerenciador](docs/PRODUCAO_MACOS.md) | Menu `.command`: instalar, importar v1, backup e atualizar |
 | Linux | [Instalar no Linux](docs/DEPLOYMENT_LINUX.md) | Terminal; serviço systemd opcional |
 
 O [guia geral](docs/INSTALACAO.md) explica dados, backup, atualização, restauração
 e acesso pela rede. Todos os sistemas usam o mesmo código com Waitress e SQLite.
 O gerenciador `.bat` é exclusivo do Windows.
 
-### Início rápido no macOS/Linux
+### Instalação guiada no Mac
+
+Baixe **Code → Download ZIP** da branch `release/v2`, extraia e execute
+`bash Gerenciar-Emprestimo.command` no Terminal dessa pasta. O menu prepara a
+instalação fora do VS Code, em diretório próprio, e pede confirmação antes de
+ativar ou importar a base v1. O endereço padrão é **http://127.0.0.1:5002**.
+Veja o [passo a passo completo](docs/PRODUCAO_MACOS.md).
+
+### Alternativa manual no macOS/Linux
 
 Com Git e Python 3.10+ instalados, em uma pasta onde deseja guardar o sistema:
 

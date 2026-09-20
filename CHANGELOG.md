@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0+build.2 — 2026-09-20
+
+- Gerenciador macOS: instalação, consulta de atualização, ativação confirmada,
+  backup e importação inicial de base v1 com validação em cópia.
+- Código por release, dados persistentes separados e execução com LaunchAgent.
+- Runner Waitress com rotação de logs e versão discreta no rodapé.
+- Testes de cópia SQLite/WAL, bloqueio de sobrescrita e cancelamento da ativação.
+- Validação contínua também em macOS. Regras financeiras e schema preservados.
+
+
 ## Documentação multiplataforma — 2026-09-19
 
 - Guias de instalação, execução automática, atualização e diagnóstico para

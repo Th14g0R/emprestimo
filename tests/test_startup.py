@@ -42,7 +42,7 @@ assert len(created) == 1, len(created)
 assert 'portal' in application.blueprints
 client = application.test_client()
 assert client.get('/').status_code == 302
-assert client.get('/health').json['version'] == '2.0.0+build.1'
+assert client.get('/health').json['version'] == '2.1.0+build.2'
 assert client.get('/login', follow_redirects=True).status_code == 200
 with application.app_context():
     from app import get_db
@@ -75,3 +75,17 @@ assert client.get('/login').status_code == 200
                                     env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('OK', result.stdout)
+
+    def test_production_runner_uses_isolated_data_and_rotating_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = dict(os.environ, EMPRESTIMO_DATA_DIR=str(root / 'data'),
+                       EMPRESTIMO_DATABASE=str(root / 'data/test.db'),
+                       EMPRESTIMO_SECRET_KEY_FILE=str(root / 'data/.secret_key'),
+                       EMPRESTIMO_LOG_DIR=str(root / 'logs'), EMPRESTIMO_TRUSTED_HOSTS='localhost')
+            result = subprocess.run([sys.executable, str(ROOT / 'producao.py'), '--check'], cwd=ROOT,
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('Produção validada: 2.1.0+build.2', result.stdout)
+            self.assertTrue((root / 'data/test.db').is_file())
+            self.assertTrue((root / 'logs/aplicacao.log').is_file())
