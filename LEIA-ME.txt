@@ -1,4 +1,4 @@
-CONTROLE DE EMPRESTIMOS — 2.1.0+build.2
+CONTROLE DE EMPRESTIMOS — 2.1.1+build.3
 Branch oficial desta versão: release/v2
 
 Instalação Windows: execute Gerenciar-Emprestimo.bat desta versão.

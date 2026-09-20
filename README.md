@@ -1,6 +1,6 @@
 # Controle de Empréstimos — versão 2
 
-Versão **2.1.0+build.2**, mantida na branch **release/v2**.
+Versão **2.1.1+build.3**, mantida na branch **release/v2**.
 Sistema de uso real para empréstimos pessoais, recebimentos e cartão de crédito,
 com interface administrativa e portal do cliente. Não inclui dados demonstrativos
 nem usuário ou senha padrão.

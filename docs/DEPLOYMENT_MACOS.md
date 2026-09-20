@@ -33,11 +33,12 @@ Se já possui outro Python 3.10 ou superior instalado, pode usá-lo no lugar de
 ## 2. Baixar o código e instalar as dependências
 
 Escolha uma pasta local permanente, fora de iCloud Drive, Dropbox ou pasta de
-rede. Este exemplo usa `Aplicativos` dentro da sua pasta pessoal:
+rede. Este exemplo usa `Applications` dentro da sua pasta pessoal (`~/Applications`),
+independentemente do nome traduzido exibido pelo Finder:
 
 ```sh
-mkdir -p "$HOME/Aplicativos"
-cd "$HOME/Aplicativos"
+mkdir -p "$HOME/Applications"
+cd "$HOME/Applications"
 git clone --branch release/v2 --single-branch https://github.com/Th14g0R/emprestimo.git emprestimo-v2
 cd emprestimo-v2
 python3.14 -m venv .venv
@@ -68,7 +69,7 @@ Para parar, pressione **Control + C** no Terminal do servidor. Para voltar a
 abrir em outro dia:
 
 ```sh
-cd "$HOME/Aplicativos/emprestimo-v2"
+cd "$HOME/Applications/emprestimo-v2"
 .venv/bin/waitress-serve --listen=127.0.0.1:5000 --threads=4 wsgi:application
 ```
 
@@ -86,7 +87,7 @@ Primeiro, pare o processo manual com Control + C. Depois, na pasta do projeto,
 copie e execute todo o bloco abaixo, incluindo a última linha `PY`:
 
 ```sh
-cd "$HOME/Aplicativos/emprestimo-v2"
+cd "$HOME/Applications/emprestimo-v2"
 .venv/bin/python - <<'PY'
 from pathlib import Path
 import plistlib

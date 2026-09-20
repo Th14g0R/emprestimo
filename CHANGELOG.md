@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.1+build.3 — 2026-09-20
+
+- Caminho padrão macOS corrigido para ~/Applications.
+- Migração confirmada do caminho antigo, com backup, proteção de instalações
+  existentes e recriação do ambiente Python/LaunchAgent. Dados permanecem no lugar.
+
+
 ## 2.1.0+build.2 — 2026-09-20
 
 - Gerenciador macOS: instalação, consulta de atualização, ativação confirmada,

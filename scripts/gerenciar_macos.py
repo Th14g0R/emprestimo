@@ -85,7 +85,7 @@ def has_financial_data(path):
 
 class Manager:
     def __init__(self, install_dir=None, state_dir=None, port=5002):
-        self.install = Path(install_dir or Path.home() / 'Aplicativos/emprestimo-v2').expanduser().resolve()
+        self.install = Path(install_dir or Path.home() / 'Applications/emprestimo-v2').expanduser().resolve()
         self.state = Path(state_dir or Path.home() / 'Library/Application Support/Emprestimo').expanduser().resolve()
         self.port = port
         if not 1024 <= port <= 65535:
@@ -108,7 +108,7 @@ class Manager:
         settings = self.state / 'gerenciador.json'
         expected = {'install_dir': str(self.install), 'state_dir': str(self.state), 'port': self.port}
         if settings.exists() and json.loads(settings.read_text()) != expected:
-            raise ValueError('Esta instalação usa outros caminhos/porta. Consulte gerenciador.json e informe os mesmos parâmetros.')
+            raise ValueError('Esta instalação usa outros caminhos/porta. Se foi instalada em ~/Aplicativos, use a opção 8 (migrar-caminho). Para caminhos personalizados, consulte gerenciador.json e informe os mesmos parâmetros.')
         with (self.state / 'operacao.lock').open('a') as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -369,16 +369,71 @@ class Manager:
         if running:
             self.start()
 
+    def migrate_path(self):
+        """Migra somente o antigo padrão traduzido, preservando dados e código."""
+        settings = self.state / 'gerenciador.json'
+        if not settings.is_file():
+            raise ValueError('Não há uma instalação anterior registrada para migrar.')
+        previous = json.loads(settings.read_text())
+        legacy = (Path.home() / 'Aplicativos/emprestimo-v2').resolve()
+        destination = (Path.home() / 'Applications/emprestimo-v2').resolve()
+        if Path(previous['install_dir']).resolve() == self.install:
+            print('O caminho registrado já corresponde a esta instalação.')
+            return
+        if (Path(previous['install_dir']).resolve() != legacy or self.install != destination
+                or Path(previous['state_dir']).resolve() != self.state or previous['port'] != self.port):
+            raise ValueError('A migração automática cobre apenas ~/Aplicativos para ~/Applications, mantendo dados e porta.')
+        if self.install.exists() and any(p.name != 'releases' for p in self.install.iterdir()):
+            raise ValueError('O destino já contém uma instalação ou outros arquivos. Preserve essa cópia em backup antes de migrar; nada foi sobrescrito.')
+        old = Manager(legacy, self.state, self.port)
+        with old.locked():
+            old.guard_plist()
+            release = old.installed()
+            if release is None:
+                raise ValueError('Versão anterior não encontrada.')
+            if run('git', 'status', '--porcelain', cwd=release, capture=True).stdout.strip():
+                raise ValueError('A release anterior possui alterações locais. Preserve-as antes de migrar.')
+            candidate = self.prepare(self.remote_commit())
+            if not self.confirm(f'Mover a instalação gerenciada de {legacy} para {destination}?\n'
+                                'O banco permanece no mesmo local. Haverá backup antes de reconfigurar o serviço.', 'MIGRAR'):
+                return
+            old.stop()
+            backup = old.backup('antes-migracao-caminho')
+            shutil.copyfile(settings, backup / 'gerenciador-anterior.json')
+            if old.plist.exists():
+                shutil.copyfile(old.plist, backup / 'LaunchAgent-anterior.plist')
+            self.point_to(candidate)
+            config = {'install_dir': str(self.install), 'state_dir': str(self.state), 'port': self.port}
+            temporary = settings.with_suffix('.novo.json')
+            temporary.write_text(json.dumps(config, indent=2))
+            os.replace(temporary, settings)
+            # O serviço antigo já foi parado e seu plist foi preservado acima.
+            if old.plist.exists():
+                old.plist.rename(backup / 'LaunchAgent-descarregado.plist')
+            try:
+                self.start()
+            except Exception:
+                print(f'Migração não concluída. Banco e releases antigas foram preservados. Backup: {backup}')
+                raise
+            shutil.move(str(legacy), str(backup / 'instalacao-caminho-antigo'))
+            if legacy.parent.is_dir():
+                entries = list(legacy.parent.iterdir())
+                if all(p.name == '.DS_Store' for p in entries):
+                    for entry in entries:
+                        entry.rename(backup / 'Finder-pasta-antiga.DS_Store')
+                    legacy.parent.rmdir()
+            print(f'Caminho corrigido: {self.install}. Dados preservados em {self.data}.')
+
     def menu(self):
         actions = {'1': self.update, '2': lambda: self.status(True), '3': self.start,
                    '4': self.stop, '5': self.make_backup,
                    '6': lambda: self.import_v1(input('Caminho completo do banco v1 (.db): ').strip().strip('"\'')),
-                   '7': self.status}
+                   '7': self.status, '8': self.migrate_path}
         while True:
             print('\nEMPRÉSTIMO V2 — PRODUÇÃO NO MAC\n'
                   '1 Instalar / atualizar (com confirmação)\n2 Consultar atualizações no GitHub\n'
                   '3 Iniciar\n4 Parar\n5 Fazer backup\n6 Importar base v1 em instalação vazia\n'
-                  '7 Ver caminhos e versão\n0 Sair')
+                  '7 Ver caminhos e versão\n8 Corrigir caminho antigo para ~/Applications\n0 Sair')
             choice = input('Opção: ').strip()
             if choice == '0':
                 return
@@ -386,8 +441,11 @@ class Manager:
                 print('Opção inválida.')
                 continue
             try:
-                with self.locked():
-                    actions[choice]()
+                if choice == '8':
+                    self.migrate_path()
+                else:
+                    with self.locked():
+                        actions[choice]()
             except (ValueError, OSError, subprocess.SubprocessError) as exc:
                 print(f'OPERAÇÃO NÃO CONCLUÍDA: {exc}')
                 if getattr(exc, 'stderr', None):
@@ -396,13 +454,16 @@ class Manager:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', nargs='?', choices=['menu', 'status', 'verificar', 'atualizar', 'iniciar', 'parar', 'backup', 'importar'], default='menu')
+    parser.add_argument('action', nargs='?', choices=['menu', 'status', 'verificar', 'atualizar', 'iniciar', 'parar', 'backup', 'importar', 'migrar-caminho'], default='menu')
     parser.add_argument('--install-dir')
     parser.add_argument('--state-dir')
     parser.add_argument('--port', type=int, default=5002)
     parser.add_argument('--banco', type=Path)
     args = parser.parse_args()
     manager = Manager(args.install_dir, args.state_dir, args.port)
+    if args.action == 'migrar-caminho':
+        manager.migrate_path()
+        return
     if args.action == 'menu':
         manager.menu()
         return

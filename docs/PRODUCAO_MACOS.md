@@ -44,8 +44,8 @@ Padrões desta instalação:
 
 | Item | Caminho / comportamento |
 | --- | --- |
-| Código | `~/Aplicativos/emprestimo-v2/releases/<commit>` |
-| Versão ativa | `~/Aplicativos/emprestimo-v2/current` (link para uma release) |
+| Código | `~/Applications/emprestimo-v2/releases/<commit>` |
+| Versão ativa | `~/Applications/emprestimo-v2/current` (link para uma release) |
 | Banco e comprovantes | `~/Library/Application Support/Emprestimo/data` |
 | Backups | `~/Library/Application Support/Emprestimo/backups` |
 | Logs | `~/Library/Application Support/Emprestimo/logs` |
@@ -138,7 +138,7 @@ e remova cópias somente depois de decidir quais versões precisa manter.
 Pode abrir o gerenciador que acompanha a versão ativa:
 
 ```sh
-bash "$HOME/Aplicativos/emprestimo-v2/current/Gerenciar-Emprestimo.command"
+bash "$HOME/Applications/emprestimo-v2/current/Gerenciar-Emprestimo.command"
 ```
 
 Assim você também passa a usar melhorias futuras do próprio gerenciador.
@@ -152,8 +152,8 @@ se ele estava em execução. Pare também instâncias manuais que usem o mesmo b
 Para consultar diretamente, sem passar pelo menu:
 
 ```sh
-bash "$HOME/Aplicativos/emprestimo-v2/current/Gerenciar-Emprestimo.command" verificar
-bash "$HOME/Aplicativos/emprestimo-v2/current/Gerenciar-Emprestimo.command" status
+bash "$HOME/Applications/emprestimo-v2/current/Gerenciar-Emprestimo.command" verificar
+bash "$HOME/Applications/emprestimo-v2/current/Gerenciar-Emprestimo.command" status
 ```
 
 O log `aplicacao.log` tem rotação de 5 MiB, com três arquivos anteriores (cerca
@@ -195,3 +195,29 @@ verifica cada banco fornecido. Os testes automatizados usam bases sintéticas e
 estrutura legada; isso **não garante que qualquer banco v1 desconhecido esteja
 íntegro ou sem divergências**. Para afirmar que a sua base foi validada, é
 necessário executar a conferência nela e realizar a checagem operacional acima.
+
+## Correção do caminho antigo (2.1.1+build.3)
+
+O diretório físico padrão é `~/Applications`, mesmo que o Finder traduza o nome
+para “Aplicativos”. Esse é o diretório de aplicações do usuário; `/Applications`
+sem `~` é o diretório compartilhado do sistema e não é usado pelo gerenciador.
+
+Se instalou uma versão anterior em `~/Aplicativos`, baixe o gerenciador atualizado
+pela branch `release/v2` e escolha **8 — Corrigir caminho antigo**, ou execute
+na pasta recém-extraída:
+
+```sh
+bash Gerenciar-Emprestimo.command migrar-caminho
+```
+
+Ele prepara uma release e um ambiente Python novos em `~/Applications`, pede
+confirmação, para o serviço, faz backup e atualiza o LaunchAgent e o registro da
+instalação. O banco permanece em `~/Library/Application Support/Emprestimo/data`.
+Não basta mover a pasta pelo Finder: o serviço e o ambiente virtual têm caminhos
+que precisam ser ajustados.
+
+A cópia antiga fica dentro do backup após a validação do novo serviço. A pasta
+`~/Aplicativos` só é removida se não contiver outros arquivos do usuário.
+Se `~/Applications/emprestimo-v2` já contém uma instalação manual, a migração
+interrompe sem sobrescrevê-la: primeiro pare essa instância e preserve a pasta
+inteira em backup. Não mescle bancos de instalações diferentes.

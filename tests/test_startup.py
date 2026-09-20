@@ -42,7 +42,7 @@ assert len(created) == 1, len(created)
 assert 'portal' in application.blueprints
 client = application.test_client()
 assert client.get('/').status_code == 302
-assert client.get('/health').json['version'] == '2.1.0+build.2'
+assert client.get('/health').json['version'] == '2.1.1+build.3'
 assert client.get('/login', follow_redirects=True).status_code == 200
 with application.app_context():
     from app import get_db
@@ -86,6 +86,6 @@ assert client.get('/login').status_code == 200
             result = subprocess.run([sys.executable, str(ROOT / 'producao.py'), '--check'], cwd=ROOT,
                                     env=env, capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn('Produção validada: 2.1.0+build.2', result.stdout)
+            self.assertIn('Produção validada: 2.1.1+build.3', result.stdout)
             self.assertTrue((root / 'data/test.db').is_file())
             self.assertTrue((root / 'logs/aplicacao.log').is_file())

@@ -20,7 +20,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Script:InstallerVersion = '2.1.0+build.2'
+$Script:InstallerVersion = '2.1.1+build.3'
 $Script:RepoUrl = 'https://github.com/Th14g0R/emprestimo.git'
 $Script:Branch = 'release/v2'
 $Script:ServiceName = 'Emprestimo'

@@ -1,6 +1,6 @@
 # Instalação e operação — Windows, Linux e macOS
 
-A versão **2.1.0+build.2** está na branch **release/v2**. O sistema é uma aplicação
+A versão **2.1.1+build.3** está na branch **release/v2**. O sistema é uma aplicação
 web: você instala o servidor em um computador e o utiliza pelo navegador.
 Não é necessário instalar Node.js, Docker ou outro banco de dados.
 

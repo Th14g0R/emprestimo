@@ -15,7 +15,7 @@ class ManagerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self.manager = Manager(self.root / 'Aplicativos com espaço', self.root / 'Estado com espaço')
+        self.manager = Manager(self.root / 'Applications com espaço', self.root / 'Estado com espaço')
         self.manager.state.mkdir()
         self.source = self.root / 'v1'
         self.source.mkdir()
@@ -141,3 +141,54 @@ class ManagerTests(unittest.TestCase):
             run.return_value.stdout = '    pid = 12345\n'
             with self.assertRaisesRegex(ValueError, 'ainda não encerrou'):
                 self.manager.stop()
+
+    def test_default_uses_real_applications_directory(self):
+        with patch.object(Path, 'home', return_value=self.root):
+            manager = Manager()
+        self.assertEqual(manager.install, (self.root / 'Applications/emprestimo-v2').resolve())
+
+    def test_path_migration_refuses_existing_manual_install(self):
+        with patch.object(Path, 'home', return_value=self.root):
+            manager = Manager(state_dir=self.manager.state)
+            old = self.root / 'Aplicativos/emprestimo-v2'
+            config = {'install_dir': str(old), 'state_dir': str(manager.state), 'port': manager.port}
+            (manager.state / 'gerenciador.json').write_text(json.dumps(config))
+            manager.install.mkdir(parents=True)
+            manual = manager.install / 'app.py'
+            manual.write_text('codigo manual preservado')
+            with self.assertRaisesRegex(ValueError, 'destino já contém'):
+                manager.migrate_path()
+            self.assertEqual(manual.read_text(), 'codigo manual preservado')
+            self.assertEqual(json.loads((manager.state / 'gerenciador.json').read_text()), config)
+
+    def test_path_migration_keeps_database_and_archives_old_install(self):
+        from contextlib import nullcontext
+        with patch.object(Path, 'home', return_value=self.root):
+            manager = Manager(state_dir=self.manager.state)
+            old = self.root / 'Aplicativos/emprestimo-v2'
+            old.mkdir(parents=True)
+            (old / 'codigo-antigo.txt').write_text('preservar')
+            (old.parent / '.DS_Store').write_bytes(b'finder')
+            config = {'install_dir': str(old), 'state_dir': str(manager.state), 'port': manager.port}
+            (manager.state / 'gerenciador.json').write_text(json.dumps(config))
+            copy_data(self.db, manager.data)
+            before = sha256(manager.data / 'emprestimos.db')
+            candidate = manager.install / 'releases/novo'
+            candidate.mkdir(parents=True)
+            backup = manager.state / 'backups/migracao'
+            backup.mkdir(parents=True)
+            with patch.object(Manager, 'locked', return_value=nullcontext()), \
+                 patch.object(Manager, 'guard_plist'), patch.object(Manager, 'installed', return_value=old), \
+                 patch.object(Manager, 'stop') as stop, patch.object(Manager, 'backup', return_value=backup), \
+                 patch.object(manager, 'prepare', return_value=candidate), \
+                 patch.object(manager, 'remote_commit', return_value='a' * 40), \
+                 patch.object(manager, 'confirm', return_value=True), patch.object(manager, 'point_to'), \
+                 patch.object(manager, 'start') as start, patch('scripts.gerenciar_macos.run') as run:
+                run.return_value.stdout = ''
+                manager.migrate_path()
+                stop.assert_called_once()
+                start.assert_called_once()
+            self.assertEqual(sha256(manager.data / 'emprestimos.db'), before)
+            self.assertEqual(json.loads((manager.state / 'gerenciador.json').read_text())['install_dir'], str(manager.install))
+            self.assertTrue((backup / 'instalacao-caminho-antigo/codigo-antigo.txt').is_file())
+            self.assertFalse(old.parent.exists())
