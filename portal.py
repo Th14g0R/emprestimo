@@ -277,7 +277,8 @@ def security_headers(response):
     response.headers.setdefault('X-Frame-Options','SAMEORIGIN')
     response.headers.setdefault('Referrer-Policy','same-origin')
     response.headers.setdefault('Permissions-Policy','camera=(), microphone=(), geolocation=()')
-    response.headers.setdefault('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+    response.headers.setdefault('Content-Security-Policy',"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; font-src 'self' data: https://fonts.gstatic.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self'")
+
     if getattr(g,'usuario',None) is not None or getattr(g,'portal_access',None) is not None:
         response.headers['Cache-Control']='no-store, no-cache, must-revalidate, private'
     if request.is_secure:

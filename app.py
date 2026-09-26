@@ -235,6 +235,8 @@ def register_hooks(app: Flask) -> None:
             abort(400, description="Token de segurança inválido. Atualize a página e tente novamente.")
 
 
+
+
 def register_context_processors(app: Flask) -> None:
     @app.context_processor
     def inject_helpers() -> dict[str, Any]:
@@ -1393,19 +1395,21 @@ def register_routes(app: Flask) -> None:
             ORDER BY a.id DESC LIMIT 200""").fetchall()
         return render_template("auditoria.html", eventos=eventos)
 
-    @app.get("/debug/tabelas")
-    @login_required
-    def debug_tables():
-        rows = get_db().execute(
-            """
-            SELECT name
-              FROM sqlite_master
-             WHERE type = 'table'
-               AND name NOT LIKE 'sqlite_%'
-             ORDER BY name
-            """
-        ).fetchall()
-        return [row["name"] for row in rows]
+    if app.debug or env_bool("EMPRESTIMO_DEBUG", False):
+        @app.get("/debug/tabelas")
+        @login_required
+        def debug_tables():
+            rows = get_db().execute(
+                """
+                SELECT name
+                  FROM sqlite_master
+                 WHERE type = 'table'
+                   AND name NOT LIKE 'sqlite_%'
+                 ORDER BY name
+                """
+            ).fetchall()
+            return [row["name"] for row in rows]
+
 
     @app.route("/configuracao-inicial", methods=["GET", "POST"])
     def configuracao_inicial():
@@ -2367,7 +2371,7 @@ def register_routes(app: Flask) -> None:
                         data_emprestimo,
                         valor_centavos,
                         valor_centavos,
-                        float(form["taxa_juros_mensal"]),
+                        float(Decimal(str(form["taxa_juros_mensal"])).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
                         data_primeiro_vencimento,
                         dia_vencimento,
                     ),

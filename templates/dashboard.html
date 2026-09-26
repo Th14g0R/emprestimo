@@ -66,12 +66,18 @@
 <section class="panel">
 <h2>Evolução dos juros recebidos</h2>
 <p class="muted">Últimos seis meses · regime de caixa</p>
-<div class="chart-bars" role="img" aria-label="Juros recebidos nos últimos seis meses: {% for m in painel.meses %}{{ m.mes|competencia_br }}: {{ m.valor|money }}; {% endfor %}">{% for m in painel.meses %}<div class="chart-column">
+<div class="chart-bars" role="img" aria-label="Juros recebidos nos últimos seis meses: {% for m in painel.meses %}{{ m.mes|competencia_br }}: {{ m.valor|money }}; {% endfor %}">
+{% for m in painel.meses %}
+<div class="chart-column" title="{{ m.mes|competencia_br }}: {{ m.valor|money }}">
 <span class="chart-value">{{ m.valor|money }}</span>
-<span class="bar" style="height:{{ m.altura }}px">
-</span>
+<div class="bar-track">
+<span class="bar" style="height:{{ [m.altura, 4]|max if m.valor > 0 else 0 }}%;"></span>
+</div>
 <small>{{ m.mes|competencia_br }}</small>
-</div>{% endfor %}</div>
+</div>
+{% endfor %}
+</div>
+
 </section>
 <section class="panel">
 <h2>Cartões</h2>

@@ -79,3 +79,12 @@ conta do cliente -> conta própria
 ## Antes de alterar lógica financeira
 
 Leia `docs/BUSINESS_RULES.md` e confirme que a alteração mantém os invariantes descritos acima.
+
+## Idioma e Comunicação
+
+- Responda e comunique-se sempre em **Português do Brasil (pt-BR)**.
+- Todos os comentários no código-fonte, docstrings e explicações técnicas devem ser escritos obrigatoriamente em **Português do Brasil (pt-BR)**.
+- Rastreamento de ações, metadados de ferramentas (`toolAction`, `toolSummary`, `Description`), solicitações de permissão e perguntas interativas devem ser apresentados exclusivamente em **Português do Brasil (pt-BR)**.
+- O acompanhamento passo a passo da evolução e depuração do código deve ser fornecido com total transparência em **Português do Brasil (pt-BR)**.
+
+

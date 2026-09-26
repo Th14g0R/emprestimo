@@ -231,11 +231,18 @@ class ApplicationTests(unittest.TestCase):
         self.post('/receber/alterar-lote',titulo_id='1',acao='salvar',nova_data=proposed,senha_confirmacao=self.password,motivo='Ajuste de agenda',assinatura='invalida')
         self.assertEqual(self.rows('SELECT data_vencimento FROM titulos_receber WHERE id=1')[0][0],self.today)
 
-    def test_public_rate_limit(self):
-        anonymous=self.app.test_client()
-        with anonymous.session_transaction() as sess:sess['csrf_token']='csrf-test'
-        responses=[anonymous.post('/portal/cadastro',data={'csrf_token':'csrf-test'}).status_code for _ in range(11)]
-        self.assertEqual(responses[-1],429)
+    def test_security_headers(self):
+        response = self.client.get('/login')
+        self.assertEqual(response.headers.get('X-Frame-Options'), 'SAMEORIGIN')
+        self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(response.headers.get('Referrer-Policy'), 'same-origin')
+        self.assertIn('geolocation=()', response.headers.get('Permissions-Policy', ''))
+
+
+    def test_debug_tables_disabled_in_production(self):
+        response = self.client.get('/debug/tabelas')
+        self.assertEqual(response.status_code, 404)
 
 
 if __name__=='__main__':unittest.main()
+

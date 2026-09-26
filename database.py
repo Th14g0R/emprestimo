@@ -156,6 +156,8 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_status ON titulos_receber(status);
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_emprestimo ON titulos_receber(emprestimo_id);
         CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia);
+        CREATE INDEX IF NOT EXISTS idx_titulos_receber_status_vencimento ON titulos_receber(status, data_vencimento, emprestimo_id);
+
 
         CREATE TABLE IF NOT EXISTS pagamentos_integrados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -516,6 +518,9 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     )
     db.execute(
         "CREATE INDEX IF NOT EXISTS idx_titulos_receber_competencia ON titulos_receber(emprestimo_id, competencia)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_titulos_receber_status_vencimento ON titulos_receber(status, data_vencimento, emprestimo_id)"
     )
 
 
