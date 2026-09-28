@@ -84,7 +84,7 @@ def has_financial_data(path):
 
 
 class Manager:
-    def __init__(self, install_dir=None, state_dir=None, port=5002):
+    def __init__(self, install_dir=None, state_dir=None, port=5000):
         self.install = Path(install_dir or Path.home() / 'Applications/emprestimo-v2').expanduser().resolve()
         self.state = Path(state_dir or Path.home() / 'Library/Application Support/Emprestimo').expanduser().resolve()
         self.port = port
@@ -457,7 +457,7 @@ def main():
     parser.add_argument('action', nargs='?', choices=['menu', 'status', 'verificar', 'atualizar', 'iniciar', 'parar', 'backup', 'importar', 'migrar-caminho'], default='menu')
     parser.add_argument('--install-dir')
     parser.add_argument('--state-dir')
-    parser.add_argument('--port', type=int, default=5002)
+    parser.add_argument('--port', type=int, default=5000)
     parser.add_argument('--banco', type=Path)
     args = parser.parse_args()
     manager = Manager(args.install_dir, args.state_dir, args.port)

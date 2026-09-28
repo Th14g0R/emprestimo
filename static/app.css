@@ -229,6 +229,128 @@ small, .muted { color: var(--muted); }
   color: var(--muted);
   font-size: 13px;
   font-weight: 500;
+  gap: 16px;
+}
+
+.topbar-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Botão de Alternância do Modo Privacidade */
+.btn-privacy-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: var(--surface-alt);
+  border: 1px solid var(--line);
+  border-radius: 9999px;
+  color: var(--text-subtle);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.btn-privacy-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.btn-privacy-toggle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.btn-privacy-toggle svg {
+  flex-shrink: 0;
+  stroke: currentColor;
+}
+
+.btn-privacy-toggle .icon-eye-closed {
+  display: none;
+}
+
+.btn-privacy-toggle .icon-eye-open {
+  display: inline-block;
+}
+
+/* Estado Ativo: Ocultar Valores */
+[data-privacy-mode="true"] .btn-privacy-toggle {
+  background: var(--brand-light);
+  border-color: var(--brand);
+  color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand-light);
+}
+
+[data-privacy-mode="true"] .btn-privacy-toggle .icon-eye-open {
+  display: none;
+}
+
+[data-privacy-mode="true"] .btn-privacy-toggle .icon-eye-closed {
+  display: inline-block;
+}
+
+/* ==========================================================================
+   Máscara e Efeito de Privacidade para Valores Financeiros
+   ========================================================================== */
+[data-privacy-mode="true"] td.money,
+[data-privacy-mode="true"] th.money,
+[data-privacy-mode="true"] .metric strong,
+[data-privacy-mode="true"] .chart-value,
+[data-privacy-mode="true"] .callout strong,
+[data-privacy-mode="true"] .priv-val,
+[data-privacy-mode="true"] [data-money] {
+  filter: blur(7px);
+  opacity: 0.85;
+  user-select: none;
+  cursor: pointer;
+  display: inline-block;
+  transition: filter 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+}
+
+/* Espiar temporariamente o valor passando o mouse ou tocando no mobile */
+[data-privacy-mode="true"] td.money:hover,
+[data-privacy-mode="true"] td.money:focus,
+[data-privacy-mode="true"] td.money.peek-revealed,
+[data-privacy-mode="true"] .metric strong:hover,
+[data-privacy-mode="true"] .metric strong.peek-revealed,
+[data-privacy-mode="true"] .chart-value:hover,
+[data-privacy-mode="true"] .chart-value.peek-revealed,
+[data-privacy-mode="true"] .callout strong:hover,
+[data-privacy-mode="true"] .callout strong.peek-revealed,
+[data-privacy-mode="true"] .priv-val:hover,
+[data-privacy-mode="true"] .priv-val.peek-revealed,
+[data-privacy-mode="true"] [data-money]:hover,
+[data-privacy-mode="true"] [data-money].peek-revealed {
+  filter: blur(0px) !important;
+  opacity: 1 !important;
+  user-select: auto;
+}
+
+/* Gráfico de evolução no dashboard: esconde a magnitude das barras */
+[data-privacy-mode="true"] .chart-bars .bar {
+  filter: blur(4px);
+  opacity: 0.2;
+  transition: filter 0.25s ease, opacity 0.25s ease;
+}
+
+[data-privacy-mode="true"] .chart-column:hover .bar,
+[data-privacy-mode="true"] .chart-column.peek-revealed .bar {
+  filter: blur(0px);
+  opacity: 1;
 }
 
 .content {
@@ -744,6 +866,10 @@ td:last-child { overflow-wrap: anywhere; max-width: 500px; }
   }
   .workspace { margin-left: 0; }
   .topbar { height: 50px; padding: 0 16px; font-size: 12px; }
+  .topbar-info { gap: 8px; }
+  .topbar-date { display: none; }
+  .btn-privacy-toggle .privacy-label { display: none; }
+  .btn-privacy-toggle { padding: 6px 10px; border-radius: 8px; min-height: 34px; }
   .content { padding: 18px 14px 48px; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 14px; margin-bottom: 20px; }
   h1 { font-size: 24px; }

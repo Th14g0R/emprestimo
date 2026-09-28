@@ -32,7 +32,7 @@ O gerenciador `.bat` é exclusivo do Windows.
 Baixe **Code → Download ZIP** da branch `release/v2`, extraia e execute
 `bash Gerenciar-Emprestimo.command` no Terminal dessa pasta. O menu prepara a
 instalação fora do VS Code, em diretório próprio, e pede confirmação antes de
-ativar ou importar a base v1. O endereço padrão é **http://127.0.0.1:5002**.
+ativar ou importar a base v1. O endereço padrão é **http://127.0.0.1:5000**.
 Veja o [passo a passo completo](docs/PRODUCAO_MACOS.md).
 
 ### Alternativa manual no macOS/Linux

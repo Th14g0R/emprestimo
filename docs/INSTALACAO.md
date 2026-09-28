@@ -12,7 +12,7 @@ Não é necessário instalar Node.js, Docker ou outro banco de dados.
 
 Siga **somente o guia do seu sistema**. O mesmo código usa Waitress e SQLite nos
 três casos. Windows e macOS têm gerenciadores por menu. O guia Linux traz os comandos
-equivalentes. No gerenciador Mac, a porta padrão é 5002 e os dados ficam
+equivalentes. No gerenciador Mac, a porta padrão é 5000 e os dados ficam
 separados do código; siga os caminhos específicos daquele guia.
 
 ## O que preparar

@@ -243,6 +243,23 @@ class ApplicationTests(unittest.TestCase):
         response = self.client.get('/debug/tabelas')
         self.assertEqual(response.status_code, 404)
 
+    def test_privacy_toggle_present_when_logged_in(self):
+        # Acessa o dashboard autenticado
+        with self.client.get('/dashboard') as response:
+            self.assertEqual(response.status_code, 200)
+            html = response.get_data(as_text=True)
+            self.assertIn('btnPrivacyToggle', html)
+            self.assertIn('Modo Privacidade', html)
+
+        # Valida que os arquivos estáticos contêm as regras de privacidade
+        with self.client.get('/static/app.css') as css_resp:
+            self.assertEqual(css_resp.status_code, 200)
+            self.assertIn('data-privacy-mode', css_resp.get_data(as_text=True))
+
+        with self.client.get('/static/app.js') as js_resp:
+            self.assertEqual(js_resp.status_code, 200)
+            self.assertIn('emprestimo_privacy_mode', js_resp.get_data(as_text=True))
+
 
 if __name__=='__main__':unittest.main()
 

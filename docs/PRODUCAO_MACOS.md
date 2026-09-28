@@ -50,11 +50,11 @@ Padrões desta instalação:
 | Backups | `~/Library/Application Support/Emprestimo/backups` |
 | Logs | `~/Library/Application Support/Emprestimo/logs` |
 | Serviço do usuário | `~/Library/LaunchAgents/br.com.emprestimo.v2.plist` |
-| Endereço | **http://127.0.0.1:5002** |
+| Endereço | **http://127.0.0.1:5000** |
 
-A porta 5002 evita a 5000, que pode estar ocupada pelo sistema no Mac. Se a porta
-escolhida estiver ocupada, o gerenciador interrompe o início; não encerra outro
-programa. A instalação local aceita apenas `localhost`/`127.0.0.1` e usa HTTP local.
+Caso a porta 5000 esteja ocupada pelo sistema no Mac (Receptor AirPlay do macOS),
+desative-o em: Ajustes do Sistema > Geral > AirDrop e Handoff > Receptor AirPlay.
+A instalação local aceita apenas `localhost`/`127.0.0.1` e usa HTTP local.
 Para publicar em rede/HTTPS, faça uma configuração específica de serviço/proxy;
 este gerenciador não reaproveita variáveis do ambiente de desenvolvimento.
 
@@ -96,7 +96,7 @@ com uma instalação manual.
 6. Se a validação permitir e os alertas estiverem conferidos, digite **IMPORTAR**.
    O gerenciador para a v2, confirma novamente que ela não recebeu cadastros,
    guarda o estado anterior e ativa a cópia importada. A origem v1 é preservada.
-7. Abra **http://127.0.0.1:5002** e entre com o usuário/senha que já utilizava.
+9. Abra **http://127.0.0.1:5000** e entre com o usuário/senha que já utilizava.
    Verifique clientes, contratos, saldos, últimos recebimentos e comprovantes.
 
 O importador não mescla bancos e não sobrescreve uma v2 com clientes, empréstimos
@@ -181,7 +181,7 @@ sobrescrita automática de uma base usada para executar restauração.
 Parâmetros opcionais, definidos já na primeira instalação:
 
 ```sh
-bash Gerenciar-Emprestimo.command --install-dir "/caminho/codigo" --state-dir "/caminho/estado" --port 5002
+bash Gerenciar-Emprestimo.command --install-dir "/caminho/codigo" --state-dir "/caminho/estado" --port 5000
 ```
 
 Use sempre os mesmos parâmetros nas próximas execuções. Código e estado precisam

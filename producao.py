@@ -8,7 +8,7 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--port', type=int, default=5002)
+    parser.add_argument('--port', type=int, default=5000)
     parser.add_argument('--check', action='store_true')
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
